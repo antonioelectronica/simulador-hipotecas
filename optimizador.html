@@ -106,7 +106,7 @@ tr.best td{color:var(--accent);font-weight:600}
 <div class="wrap">
   <header>
     <h1>Optimizador de hipoteca</h1>
-    <p>Ajusta tus datos y la herramienta busca la entrada, el plazo y las vinculaciones que menos intereses te hacen pagar, cumpliendo tu ratio de deuda, tu colchón y el LTV que te da el banco.</p>
+    <p>Ajusta tus datos y la herramienta busca la entrada, el plazo y las vinculaciones que menos intereses te hacen pagar, cumpliendo tu ratio de deuda, la cuota máxima que quieras pagar, tu colchón y el LTV que te da el banco.</p>
   </header>
 
   <div class="cols">
@@ -132,6 +132,7 @@ tr.best td{color:var(--accent);font-weight:600}
             <label class="f">Ingresos netos/mes<span class="inp"><input id="ingresos" inputmode="decimal"><span>€</span></span></label>
             <label class="f">Otras deudas/mes<span class="inp"><input id="deudas" inputmode="decimal"><span>€</span></span></label>
             <label class="f">Ratio de deuda máx.<span class="inp"><input id="ratio" inputmode="decimal"><span>%</span></span></label>
+            <label class="f">Cuota máx. deseada<span class="inp"><input id="cuotamax" inputmode="decimal" placeholder="Sin límite"><span>€</span></span></label>
             <label class="f">Edad<span class="inp"><input id="edad" inputmode="decimal"><span>años</span></span></label>
           </div>
         </fieldset>
@@ -192,7 +193,7 @@ tr.best td{color:var(--accent);font-weight:600}
 (() => {
   const DEF = {
     precio: 140000, itp: 3.5, tasacion: 320, notaria: 600, registro: 300, otros: 0,
-    ahorros: 30000, colchon: 5000, ingresos: 2593, deudas: 0, ratio: 30, edad: 28,
+    ahorros: 30000, colchon: 5000, ingresos: 2593, deudas: 0, ratio: 30, cuotamax: 0, edad: 28,
     tin: 3.9, ltvmax: 100, pmin: 5, pmax: 40, edadmax: 75,
     vmode: "fijas", obj: "int",
     vinc: [
@@ -217,10 +218,11 @@ tr.best td{color:var(--accent);font-weight:600}
   const num = (t) => { t = String(t).trim(); if (/,/.test(t)) t = t.replace(/\./g, "").replace(",", "."); else if (/^\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, ""); const v = parseFloat(t); return isNaN(v) ? NaN : v; };
 
   // ---------- campos ----------
-  const ids = ["precio","itp","tasacion","notaria","registro","otros","ahorros","colchon","ingresos","deudas","ratio","edad","tin","ltvmax","pmin","pmax","edadmax"];
+  const ids = ["precio","itp","tasacion","notaria","registro","otros","ahorros","colchon","ingresos","deudas","ratio","cuotamax","edad","tin","ltvmax","pmin","pmax","edadmax"];
   const okText = (t) => /^-?[\d.,]*$/.test(t);
   function bindNum(el, get, set) {
-    el.value = fmtIn(get());
+    const show = (v) => (el.placeholder && !v) ? "" : fmtIn(v);
+    el.value = show(get());
     el.addEventListener("input", () => {
       const t = el.value.trim();
       if (!okText(t)) { el.value = el.dataset.prev ?? ""; return; }
@@ -229,7 +231,7 @@ tr.best td{color:var(--accent);font-weight:600}
       if (!isNaN(v)) { set(v); run(); }
       else if (t === "") { set(0); run(); }
     });
-    el.addEventListener("blur", () => { el.value = fmtIn(get()); el.dataset.prev = el.value; });
+    el.addEventListener("blur", () => { el.value = show(get()); el.dataset.prev = el.value; });
     el.dataset.prev = el.value;
   }
   ids.forEach((k) => bindNum(document.getElementById(k), () => S[k], (v) => { S[k] = v; }));
@@ -269,9 +271,11 @@ tr.best td{color:var(--accent);font-weight:600}
     const gastos = S.precio * S.itp / 100 + S.tasacion + S.notaria + S.registro + S.otros;
     const disp = S.ahorros - S.colchon;
     const entradaMax = disp - gastos;
-    const qmax = S.ratio / 100 * S.ingresos - S.deudas;
+    const qratio = S.ratio / 100 * S.ingresos - S.deudas;
+    const qmax = S.cuotamax > 0 ? Math.min(qratio, S.cuotamax) : qratio;
+    const limCuota = S.cuotamax > 0 && S.cuotamax < qratio;
     const plazoTope = Math.min(S.pmax, S.edadmax - S.edad);
-    return { gastos, disp, entradaMax, qmax, plazoTope };
+    return { gastos, disp, entradaMax, qratio, qmax, limCuota, plazoTope };
   }
   function evalua(L, n, tin, costeVinc, B) {
     const q = cuota(L, tin, n);
@@ -281,7 +285,8 @@ tr.best td{color:var(--accent);font-weight:600}
     const fallos = [];
     if (entrada > B.entradaMax + 0.5) fallos.push("ahorro");
     if (ltv > S.ltvmax + 1e-9) fallos.push("ltv");
-    if (q > B.qmax + 1e-6) fallos.push("ratio");
+    if (q > B.qratio + 1e-6) fallos.push("ratio");
+    if (S.cuotamax > 0 && q > S.cuotamax + 1e-6) fallos.push("cuota");
     if (n / 12 > B.plazoTope || n / 12 < S.pmin) fallos.push("plazo");
     return { L, n, q, intereses, ltv, entrada, costeV: costeVinc * n / 12, fallos };
   }
@@ -312,7 +317,7 @@ tr.best td{color:var(--accent);font-weight:600}
       if (r.fallos.length) continue;
       if (!best || objetivo(r) < objetivo(best) - 1e-6) best = r;
     }
-    if (!best) res.motivo = B.qmax <= 0 ? "ingresos" : "ratio";
+    if (!best) res.motivo = B.qratio <= 0 ? "ingresos" : "ratio";
     res.mejor = best;
     return res;
   }
@@ -349,7 +354,9 @@ tr.best td{color:var(--accent);font-weight:600}
         const q = cuota(r.Lmin, r.tin, n);
         const ingNec = (q + S.deudas) / (S.ratio / 100);
         const Lok = prestamoMax(B.qmax, r.tin, n);
-        msg = `Ni al plazo máximo (${Math.floor(B.plazoTope)} años) la cuota de ${eur2(q)} cabe en tu ratio (máximo ${eur2(B.qmax)}). Necesitarías ${eur(ingNec)} netos al mes, o meter <b>${eur(r.Lmin - Lok)}</b> más de entrada.`;
+        msg = B.limCuota
+          ? `Ni al plazo máximo (${Math.floor(B.plazoTope)} años) la cuota de ${eur2(q)} baja de tu cuota máxima deseada (${eur2(B.qmax)}). Sube la cuota máxima o mete <b>${eur(r.Lmin - Lok)}</b> más de entrada.`
+          : `Ni al plazo máximo (${Math.floor(B.plazoTope)} años) la cuota de ${eur2(q)} cabe en tu ratio (máximo ${eur2(B.qmax)}). Necesitarías ${eur(ingNec)} netos al mes, o meter <b>${eur(r.Lmin - Lok)}</b> más de entrada.`;
       }
       $v.innerHTML = `<span class="eyebrow">Sin solución</span><h2 class="fail">Con estos datos no hay hipoteca que cumpla todo</h2><p>${msg}</p>`;
       return;
@@ -358,6 +365,7 @@ tr.best td{color:var(--accent);font-weight:600}
     const colchonReal = S.ahorros - B.gastos - m.entrada;
     const chips = [
       [`Ratio de deuda ${pct((m.q + S.deudas) / S.ingresos * 100)} de ${pct(S.ratio, 0)}`, (m.q + S.deudas) / S.ingresos * 100 > S.ratio - 1 ? "w" : ""],
+      ...(S.cuotamax > 0 ? [[`Cuota ${eur2(m.q)} de ${eur(S.cuotamax)} máx.`, m.q > S.cuotamax * 0.97 ? "w" : ""]] : []),
       [`Colchón ${eur(colchonReal)}`, ""],
       [`LTV ${pct(m.ltv)} de ${pct(S.ltvmax, 0)} máx.`, m.ltv > 80 ? "w" : ""],
       [`Terminas a los ${Math.round(S.edad + y)} años`, ""],
@@ -432,7 +440,7 @@ tr.best td{color:var(--accent);font-weight:600}
       const t = e.target.closest("rect[data-l]"); if (!t) return;
       const l = +t.dataset.l, y = +t.dataset.y;
       const r = evalua(S.precio * l / 100, y * 12, tin, cv, B);
-      const why = { ahorro: "no te llega el ahorro", ltv: "pasa del LTV máximo", ratio: "pasa del ratio de deuda", plazo: "fuera del plazo permitido" };
+      const why = { ahorro: "no te llega el ahorro", ltv: "pasa del LTV máximo", ratio: "pasa del ratio de deuda", cuota: "pasa de tu cuota máxima", plazo: "fuera del plazo permitido" };
       $cell.innerHTML = `<b>${l} % · ${y} años</b>: préstamo ${eur(r.L)}, cuota ${eur2(r.q)}, intereses ${eur(r.intereses)}` +
         (r.fallos.length ? ` · <span class="fail">no cumple: ${r.fallos.map((f) => why[f]).join(", ")}</span>` : "");
     };
@@ -450,7 +458,7 @@ tr.best td{color:var(--accent);font-weight:600}
     }).join("");
     $combos.innerHTML = `<h3>Combinaciones de vinculaciones</h3>
       <div class="tablewrap"><table><thead><tr><th>Vinculaciones</th><th>TIN</th><th>Años</th><th>Cuota</th><th>Intereses</th><th>Coste vinc.</th><th>Total</th></tr></thead><tbody>${filas}</tbody></table></div>
-      <p class="note">Ordenadas por ${S.obj === "tot" ? "intereses + coste de las vinculaciones" : "intereses"}. Cada una con su préstamo mínimo y su plazo más corto que cumple el ratio.</p>`;
+      <p class="note">Ordenadas por ${S.obj === "tot" ? "intereses + coste de las vinculaciones" : "intereses"}. Cada una con su préstamo mínimo y su plazo más corto que cumple el ratio y la cuota máxima.</p>`;
   }
 
   matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", run);
