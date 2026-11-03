@@ -9,4 +9,6 @@ Simulador de cuota, TAE y coste total de una hipoteca, con:
 
 Abrir: https://antonioelectronica.github.io/simulador-hipotecas/
 
+Optimizador (plazo, LTV y vinculaciones que minimizan intereses): https://antonioelectronica.github.io/simulador-hipotecas/optimizador.html
+
 Basado en el simulador público de habitacion.com, con modificaciones propias.

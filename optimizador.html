@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Optimizador de hipoteca</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: mesa de trabajo de dos columnas; datos a la izquierda, veredicto y mapa a la derecha (una columna en el móvil) */
+:root{
+  --bg:#f3f5f2; --panel:#ffffff; --fg:#15211d; --muted:#5c6b65; --line:#dbe2dd;
+  --accent:#0f6b5c; --accent-soft:#e1efe9; --ok:#15803d; --warn:#b45309; --bad:#b42318;
+  --heat-lo:#0f6b5c; --heat-hi:#e9c46a; --off:#e6e9e6;
+  --f-display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;
+  --f-num:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f1513; --panel:#161e1b; --fg:#e4ece8; --muted:#93a39c; --line:#2a3531;
+  --accent:#4fb39f; --accent-soft:#1b2d28; --ok:#4ade80; --warn:#f59e0b; --bad:#f87171;
+  --heat-lo:#2f8f7c; --heat-hi:#d9b45a; --off:#1e2724; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f1513; --panel:#161e1b; --fg:#e4ece8; --muted:#93a39c; --line:#2a3531;
+  --accent:#4fb39f; --accent-soft:#1b2d28; --ok:#4ade80; --warn:#f59e0b; --bad:#f87171;
+  --heat-lo:#2f8f7c; --heat-hi:#d9b45a; --off:#1e2724; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--f-body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 40px}
+.wrap{max-width:1180px;margin:0 auto;display:grid;gap:20px}
+header h1{font:700 clamp(1.6rem,4vw,2.2rem)/1.1 var(--f-display);margin:0;text-wrap:balance;letter-spacing:-.01em}
+header p{margin:6px 0 0;color:var(--muted);max-width:62ch}
+.cols{display:grid;gap:20px;grid-template-columns:minmax(0,400px) minmax(0,1fr);align-items:start}
+@media (max-width:860px){.cols{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+form{display:grid;gap:14px}
+fieldset{border:0;margin:0;padding:0;display:grid;gap:8px}
+legend{font:600 .72rem/1 var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:0 0 6px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 10px}
+label.f{display:grid;gap:3px;font-size:.82rem;color:var(--muted);min-width:0}
+.inp{display:flex;align-items:center;border:1px solid var(--line);border-radius:9px;background:var(--bg);padding:0 10px;height:38px}
+.inp:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.inp{min-width:0}
+.inp input{all:unset;flex:1;min-width:0;width:0;font:500 15px var(--f-num);color:var(--fg);text-align:right}
+.inp span{font:13px var(--f-num);color:var(--muted);padding-left:6px}
+.vinc{display:grid;gap:6px}
+.vrow{display:grid;grid-template-columns:auto minmax(0,1fr) 78px 84px auto;gap:6px;align-items:center}
+.vrow .inp{height:34px;padding:0 7px}.vrow .inp input{font-size:13px}
+.vrow input.nm{all:unset;min-width:0;font-size:.9rem;border-bottom:1px dashed transparent}
+.vrow input.nm:focus{border-bottom-color:var(--accent)}
+.vhead{display:grid;grid-template-columns:auto minmax(0,1fr) 78px 84px auto;gap:6px;font-size:.7rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+.vhead span:first-child{width:20px}
+input[type=checkbox]{width:20px;height:20px;accent-color:var(--accent);margin:0}
+button{font:500 .85rem var(--f-body);border-radius:9px;border:1px solid var(--line);background:var(--panel);color:var(--fg);padding:7px 12px;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.x{border:0;background:none;color:var(--muted);padding:4px 6px;font-size:1rem}
+.seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg label{display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 6px;font-size:.82rem;cursor:pointer;text-align:center}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg label:has(input:checked){background:var(--accent);color:var(--panel);font-weight:600}
+.seg label:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:-2px}
+.note{font-size:.78rem;color:var(--muted);margin:0}
+
+/* Resultado */
+.res{display:grid;gap:16px;min-width:0;position:sticky;top:calc(12px + env(safe-area-inset-top,0px))}
+@media (max-width:860px){.res{position:static}}
+.res>*{min-width:0}
+.verdict{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;display:grid;gap:14px}
+.verdict .eyebrow{font:600 .72rem/1 var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.verdict h2{margin:0;font:700 clamp(1.35rem,3.4vw,1.8rem)/1.15 var(--f-display);text-wrap:balance}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+@media (max-width:560px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.kpi{border-top:2px solid var(--line);padding-top:8px;min-width:0}
+.kpi b{display:block;font:500 clamp(1.05rem,2.6vw,1.35rem)/1.2 var(--f-num);font-variant-numeric:tabular-nums;white-space:nowrap}
+.kpi small{color:var(--muted);font-size:.78rem}
+.kpi.main{border-top-color:var(--accent)} .kpi.main b{color:var(--accent)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:.78rem;padding:4px 9px;border-radius:999px;border:1px solid var(--line);display:inline-flex;gap:5px;align-items:center}
+.chip i{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block}
+.chip.w i{background:var(--warn)} .chip.b i{background:var(--bad)}
+.tips{display:grid;gap:6px;margin:0;padding:0;list-style:none}
+.tips li{font-size:.88rem;padding-left:14px;position:relative}
+.tips li::before{content:"";position:absolute;left:0;top:.6em;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.fail{color:var(--bad)}
+h3{margin:0 0 8px;font:600 1rem var(--f-display)}
+.mapwrap{overflow-x:auto}
+#map{display:block;width:100%;min-width:560px;height:auto}
+#map text{font-family:var(--f-num);fill:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:12px;align-items:center;font-size:.76rem;color:var(--muted);margin-top:8px}
+.legend .sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-2px;margin-right:4px}
+#cell{font-size:.85rem;margin-top:8px;min-height:1.4em;font-variant-numeric:tabular-nums}
+table{width:100%;border-collapse:collapse;font-size:.84rem}
+th,td{padding:7px 6px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th{font-weight:500;color:var(--muted);font-size:.74rem;text-transform:uppercase;letter-spacing:.04em}
+th:first-child,td:first-child{text-align:left;white-space:normal}
+td{font-family:var(--f-num);font-variant-numeric:tabular-nums}
+td:first-child{font-family:var(--f-body)}
+tr.best td{color:var(--accent);font-weight:600}
+.tablewrap{overflow-x:auto}
+@media (prefers-reduced-motion:no-preference){.kpi b{transition:color .2s}}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Optimizador de hipoteca</h1>
+    <p>Ajusta tus datos y la herramienta busca la entrada, el plazo y las vinculaciones que menos intereses te hacen pagar, cumpliendo tu ratio de deuda, tu colchón y el LTV que te da el banco.</p>
+  </header>
+
+  <div class="cols">
+    <div class="panel">
+      <form id="f" autocomplete="off">
+        <fieldset>
+          <legend>Vivienda y gastos de compra</legend>
+          <div class="grid2">
+            <label class="f">Precio<span class="inp"><input id="precio" inputmode="decimal"><span>€</span></span></label>
+            <label class="f">ITP<span class="inp"><input id="itp" inputmode="decimal"><span>%</span></span></label>
+            <label class="f">Tasación<span class="inp"><input id="tasacion" inputmode="decimal"><span>€</span></span></label>
+            <label class="f">Notaría<span class="inp"><input id="notaria" inputmode="decimal"><span>€</span></span></label>
+            <label class="f">Registro<span class="inp"><input id="registro" inputmode="decimal"><span>€</span></span></label>
+            <label class="f">Otros gastos<span class="inp"><input id="otros" inputmode="decimal"><span>€</span></span></label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Tu dinero</legend>
+          <div class="grid2">
+            <label class="f">Ahorros<span class="inp"><input id="ahorros" inputmode="decimal"><span>€</span></span></label>
+            <label class="f">Colchón a conservar<span class="inp"><input id="colchon" inputmode="decimal"><span>€</span></span></label>
+            <label class="f">Ingresos netos/mes<span class="inp"><input id="ingresos" inputmode="decimal"><span>€</span></span></label>
+            <label class="f">Otras deudas/mes<span class="inp"><input id="deudas" inputmode="decimal"><span>€</span></span></label>
+            <label class="f">Ratio de deuda máx.<span class="inp"><input id="ratio" inputmode="decimal"><span>%</span></span></label>
+            <label class="f">Edad<span class="inp"><input id="edad" inputmode="decimal"><span>años</span></span></label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Condiciones del banco</legend>
+          <div class="grid2">
+            <label class="f">TIN sin bonificar<span class="inp"><input id="tin" inputmode="decimal"><span>%</span></span></label>
+            <label class="f">LTV máximo<span class="inp"><input id="ltvmax" inputmode="decimal"><span>%</span></span></label>
+            <label class="f">Plazo mínimo<span class="inp"><input id="pmin" inputmode="decimal"><span>años</span></span></label>
+            <label class="f">Plazo máximo<span class="inp"><input id="pmax" inputmode="decimal"><span>años</span></span></label>
+            <label class="f">Edad máx. al terminar<span class="inp"><input id="edadmax" inputmode="decimal"><span>años</span></span></label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Vinculaciones</legend>
+          <div class="vhead"><span></span><span>Producto</span><span>Bonif.</span><span>Coste/año</span><span></span></div>
+          <div class="vinc" id="vinc"></div>
+          <div><button type="button" id="addv">Añadir vinculación</button></div>
+          <div class="seg" role="radiogroup" aria-label="Qué vinculaciones usar">
+            <label><input type="radio" name="vmode" value="fijas" id="vm-fijas">Solo las marcadas</label>
+            <label><input type="radio" name="vmode" value="todas" id="vm-todas">Elegir las que convengan</label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Qué minimizar</legend>
+          <div class="seg" role="radiogroup" aria-label="Objetivo">
+            <label><input type="radio" name="obj" value="int" id="ob-int">Intereses</label>
+            <label><input type="radio" name="obj" value="tot" id="ob-tot">Intereses + vinculaciones</label>
+          </div>
+          <p class="note">Los datos se guardan en este navegador.</p>
+        </fieldset>
+      </form>
+    </div>
+
+    <div class="res">
+      <section class="verdict" id="verdict" aria-live="polite"></section>
+      <section class="panel">
+        <h3>Mapa de plazo y LTV</h3>
+        <p class="note">Cada casilla es una combinación de años y porcentaje financiado con las vinculaciones del óptimo. Cuanto más verde, menos intereses. Las grises incumplen alguna condición. Toca una casilla para ver el detalle.</p>
+        <div class="mapwrap"><svg id="map" role="img" aria-label="Mapa de intereses por plazo y LTV"></svg></div>
+        <div class="legend">
+          <span><span class="sw" style="background:var(--heat-lo)"></span>Menos intereses</span>
+          <span><span class="sw" style="background:var(--heat-hi)"></span>Más intereses</span>
+          <span><span class="sw" style="background:var(--off)"></span>No cumple</span>
+          <span><span class="sw" style="background:transparent;outline:2px solid var(--fg)"></span>Óptimo</span>
+        </div>
+        <div id="cell"></div>
+      </section>
+      <section class="panel" id="combos"></section>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const DEF = {
+    precio: 140000, itp: 3.5, tasacion: 320, notaria: 600, registro: 300, otros: 0,
+    ahorros: 30000, colchon: 5000, ingresos: 2593, deudas: 0, ratio: 30, edad: 28,
+    tin: 3.9, ltvmax: 100, pmin: 5, pmax: 40, edadmax: 75,
+    vmode: "fijas", obj: "int",
+    vinc: [
+      { n: "Nómina", b: 0.35, c: 0, on: true },
+      { n: "Seguro de vida", b: 0.35, c: 380, on: false },
+      { n: "Seguro de hogar", b: 0.15, c: 430, on: false },
+      { n: "Alarma", b: 0.15, c: 52.03, on: true },
+    ],
+  };
+  const KEY = "optimizador-hipoteca-v1";
+  let S;
+  try { S = JSON.parse(localStorage.getItem(KEY)) || null; } catch { S = null; }
+  S = Object.assign(structuredClone(DEF), S || {});
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch {} };
+
+  const nf0 = new Intl.NumberFormat("es-ES", { maximumFractionDigits: 0, useGrouping: "always" });
+  const nf2 = new Intl.NumberFormat("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: "always" });
+  const eur = (v) => nf0.format(Math.round(v)) + " €";
+  const eur2 = (v) => nf2.format(v) + " €";
+  const pct = (v, d = 1) => v.toLocaleString("es-ES", { minimumFractionDigits: d, maximumFractionDigits: d }) + " %";
+  const fmtIn = (v) => (v === "" || v == null || isNaN(v)) ? "" : String(+(+v).toFixed(4)).replace(".", ",");
+  const num = (t) => { t = String(t).trim(); if (/,/.test(t)) t = t.replace(/\./g, "").replace(",", "."); else if (/^\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, ""); const v = parseFloat(t); return isNaN(v) ? NaN : v; };
+
+  // ---------- campos ----------
+  const ids = ["precio","itp","tasacion","notaria","registro","otros","ahorros","colchon","ingresos","deudas","ratio","edad","tin","ltvmax","pmin","pmax","edadmax"];
+  const okText = (t) => /^-?[\d.,]*$/.test(t);
+  function bindNum(el, get, set) {
+    el.value = fmtIn(get());
+    el.addEventListener("input", () => {
+      const t = el.value.trim();
+      if (!okText(t)) { el.value = el.dataset.prev ?? ""; return; }
+      el.dataset.prev = el.value;
+      const v = num(t);
+      if (!isNaN(v)) { set(v); run(); }
+      else if (t === "") { set(0); run(); }
+    });
+    el.addEventListener("blur", () => { el.value = fmtIn(get()); el.dataset.prev = el.value; });
+    el.dataset.prev = el.value;
+  }
+  ids.forEach((k) => bindNum(document.getElementById(k), () => S[k], (v) => { S[k] = v; }));
+  document.getElementById("vm-" + S.vmode).checked = true;
+  document.getElementById("ob-" + S.obj).checked = true;
+  document.querySelectorAll("input[name=vmode]").forEach((r) => r.addEventListener("change", () => { S.vmode = r.value; run(); }));
+  document.querySelectorAll("input[name=obj]").forEach((r) => r.addEventListener("change", () => { S.obj = r.value; run(); }));
+
+  const vbox = document.getElementById("vinc");
+  function drawVinc() {
+    vbox.innerHTML = "";
+    S.vinc.forEach((v, i) => {
+      const row = document.createElement("div"); row.className = "vrow";
+      row.innerHTML = `<input type="checkbox" id="v-on-${i}" aria-label="Activar ${v.n}">
+        <input class="nm" id="v-n-${i}" aria-label="Nombre">
+        <span class="inp"><input id="v-b-${i}" inputmode="decimal" aria-label="Bonificación"><span>%</span></span>
+        <span class="inp"><input id="v-c-${i}" inputmode="decimal" aria-label="Coste anual"><span>€</span></span>
+        <button type="button" class="x" aria-label="Quitar ${v.n}">×</button>`;
+      vbox.appendChild(row);
+      const on = row.querySelector(`#v-on-${i}`); on.checked = v.on;
+      on.addEventListener("change", () => { v.on = on.checked; run(); });
+      const nm = row.querySelector(`#v-n-${i}`); nm.value = v.n;
+      nm.addEventListener("input", () => { v.n = nm.value; run(); });
+      bindNum(row.querySelector(`#v-b-${i}`), () => v.b, (x) => { v.b = x; });
+      bindNum(row.querySelector(`#v-c-${i}`), () => v.c, (x) => { v.c = x; });
+      row.querySelector("button").addEventListener("click", () => { S.vinc.splice(i, 1); drawVinc(); run(); });
+    });
+  }
+  document.getElementById("addv").addEventListener("click", () => { S.vinc.push({ n: "Nueva", b: 0.1, c: 0, on: false }); drawVinc(); run(); });
+  drawVinc();
+
+  // ---------- cálculo ----------
+  const cuota = (L, tin, n) => { const i = tin / 1200; return i === 0 ? L / n : L * i / (1 - Math.pow(1 + i, -n)); };
+  const prestamoMax = (q, tin, n) => { const i = tin / 1200; return i === 0 ? q * n : q * (1 - Math.pow(1 + i, -n)) / i; };
+
+  function base() {
+    const gastos = S.precio * S.itp / 100 + S.tasacion + S.notaria + S.registro + S.otros;
+    const disp = S.ahorros - S.colchon;
+    const entradaMax = disp - gastos;
+    const qmax = S.ratio / 100 * S.ingresos - S.deudas;
+    const plazoTope = Math.min(S.pmax, S.edadmax - S.edad);
+    return { gastos, disp, entradaMax, qmax, plazoTope };
+  }
+  function evalua(L, n, tin, costeVinc, B) {
+    const q = cuota(L, tin, n);
+    const intereses = q * n - L;
+    const ltv = L / S.precio * 100;
+    const entrada = S.precio - L;
+    const fallos = [];
+    if (entrada > B.entradaMax + 0.5) fallos.push("ahorro");
+    if (ltv > S.ltvmax + 1e-9) fallos.push("ltv");
+    if (q > B.qmax + 1e-6) fallos.push("ratio");
+    if (n / 12 > B.plazoTope || n / 12 < S.pmin) fallos.push("plazo");
+    return { L, n, q, intereses, ltv, entrada, costeV: costeVinc * n / 12, fallos };
+  }
+  const objetivo = (r) => S.obj === "tot" ? r.intereses + r.costeV : r.intereses;
+
+  function combos() {
+    const act = S.vinc.map((v, i) => i);
+    if (S.vmode === "fijas") return [S.vinc.filter((v) => v.on)];
+    const out = [];
+    const n = Math.min(S.vinc.length, 10);
+    for (let m = 0; m < (1 << n); m++) out.push(S.vinc.filter((_, i) => i < n && (m >> i) & 1));
+    return out;
+  }
+
+  // Óptimo de una combinación: el préstamo mínimo posible y el plazo más corto que cumpla el ratio
+  function optimo(sel, B) {
+    const bon = sel.reduce((a, v) => a + (v.b || 0), 0);
+    const tin = Math.max(0, S.tin - bon);
+    const costeVinc = sel.reduce((a, v) => a + (v.c || 0), 0);
+    const Lmin = Math.max(0, S.precio - Math.max(0, B.entradaMax));
+    const res = { sel, tin, costeVinc, Lmin, mejor: null, motivo: null };
+    if (B.entradaMax < S.precio * (1 - S.ltvmax / 100) - 0.5) { res.motivo = "ahorro-ltv"; return res; }
+    if (Lmin === 0) { res.mejor = { L: 0, n: 0, q: 0, intereses: 0, ltv: 0, entrada: S.precio, costeV: 0, fallos: [] }; return res; }
+    let best = null;
+    const tope = Math.floor(B.plazoTope);
+    for (let y = Math.ceil(S.pmin); y <= tope; y++) {
+      const r = evalua(Lmin, y * 12, tin, costeVinc, B);
+      if (r.fallos.length) continue;
+      if (!best || objetivo(r) < objetivo(best) - 1e-6) best = r;
+    }
+    if (!best) res.motivo = B.qmax <= 0 ? "ingresos" : "ratio";
+    res.mejor = best;
+    return res;
+  }
+
+  // ---------- pintado ----------
+  const $v = document.getElementById("verdict");
+  const $map = document.getElementById("map");
+  const $cell = document.getElementById("cell");
+  const $combos = document.getElementById("combos");
+  const nombres = (sel) => sel.length ? sel.map((v) => v.n).join(" + ") : "Sin vinculaciones";
+
+  function run() {
+    save();
+    const B = base();
+    const lista = combos().map((sel) => optimo(sel, B));
+    const validos = lista.filter((r) => r.mejor).sort((a, b) => objetivo(a.mejor) - objetivo(b.mejor));
+    const win = validos[0];
+    pintaVeredicto(win, lista, B);
+    pintaMapa(win || lista[0], B);
+    pintaCombos(validos, B);
+  }
+
+  function pintaVeredicto(win, lista, B) {
+    if (!win) {
+      const r = lista[0];
+      let msg = "";
+      if (r.motivo === "ahorro-ltv") {
+        const falta = S.precio * (1 - S.ltvmax / 100) - B.entradaMax;
+        msg = `Con un LTV máximo del ${pct(S.ltvmax, 0)} necesitas ${eur(S.precio * (1 - S.ltvmax / 100) + B.gastos)} entre entrada y gastos, y tienes ${eur(B.disp)} disponibles. Te faltan <b>${eur(falta)}</b>: reduce el colchón, busca un banco que financie más o una vivienda más barata.`;
+      } else if (r.motivo === "ingresos") {
+        msg = "Tus otras deudas ya superan el ratio máximo: no queda cuota disponible.";
+      } else {
+        const n = Math.floor(B.plazoTope) * 12;
+        const q = cuota(r.Lmin, r.tin, n);
+        const ingNec = (q + S.deudas) / (S.ratio / 100);
+        const Lok = prestamoMax(B.qmax, r.tin, n);
+        msg = `Ni al plazo máximo (${Math.floor(B.plazoTope)} años) la cuota de ${eur2(q)} cabe en tu ratio (máximo ${eur2(B.qmax)}). Necesitarías ${eur(ingNec)} netos al mes, o meter <b>${eur(r.Lmin - Lok)}</b> más de entrada.`;
+      }
+      $v.innerHTML = `<span class="eyebrow">Sin solución</span><h2 class="fail">Con estos datos no hay hipoteca que cumpla todo</h2><p>${msg}</p>`;
+      return;
+    }
+    const m = win.mejor, y = m.n / 12;
+    const colchonReal = S.ahorros - B.gastos - m.entrada;
+    const chips = [
+      [`Ratio de deuda ${pct((m.q + S.deudas) / S.ingresos * 100)} de ${pct(S.ratio, 0)}`, (m.q + S.deudas) / S.ingresos * 100 > S.ratio - 1 ? "w" : ""],
+      [`Colchón ${eur(colchonReal)}`, ""],
+      [`LTV ${pct(m.ltv)} de ${pct(S.ltvmax, 0)} máx.`, m.ltv > 80 ? "w" : ""],
+      [`Terminas a los ${Math.round(S.edad + y)} años`, ""],
+    ];
+    // Sugerencias: cuánto más de entrada para bajar un año
+    const tips = [];
+    if (y > S.pmin) {
+      const Lneed = prestamoMax(B.qmax, win.tin, (y - 1) * 12);
+      const extra = m.L - Lneed;
+      if (extra > 0) {
+        const r2 = evalua(Lneed, (y - 1) * 12, win.tin, win.costeVinc, B);
+        tips.push(`Con <b>${eur(extra)}</b> más de entrada (sacados del colchón) bajarías a ${y - 1} años y ahorrarías <b>${eur(m.intereses - r2.intereses)}</b> de intereses.`);
+      }
+    }
+    const r1k = evalua(Math.max(0, m.L - 1000), m.n, win.tin, win.costeVinc, B);
+    tips.push(`Cada 1.000 € más de entrada al mismo plazo ahorran ${eur(m.intereses - r1k.intereses)} de intereses.`);
+    if (m.ltv > 80) tips.push("Por encima del 80 % de LTV muchos bancos no financian: pregunta por financiación para menores de 35 años o por el aval ICO para jóvenes.");
+    if (win.costeVinc > 0) tips.push(`Las vinculaciones elegidas cuestan ${eur(win.costeVinc)} al año: ${eur(m.costeV)} en todo el plazo.`);
+
+    $v.innerHTML = `<span class="eyebrow">Óptimo</span>
+      <h2>${eur(S.precio - m.entrada)} a ${y} años con ${nombres(win.sel).toLowerCase()}</h2>
+      <div class="kpis">
+        <div class="kpi main"><b>${eur(m.intereses)}</b><small>Intereses totales</small></div>
+        <div class="kpi"><b>${eur2(m.q)}</b><small>Cuota al mes</small></div>
+        <div class="kpi"><b>${pct(win.tin, 2)}</b><small>TIN bonificado</small></div>
+        <div class="kpi"><b>${eur(m.entrada)}</b><small>Entrada (+ ${eur(B.gastos)} gastos)</small></div>
+      </div>
+      <div class="chips">${chips.map(([t, c]) => `<span class="chip ${c}"><i></i>${t}</span>`).join("")}</div>
+      <ul class="tips">${tips.map((t) => `<li>${t}</li>`).join("")}</ul>`;
+  }
+
+  function pintaMapa(win, B) {
+    const tin = win.tin, cv = win.costeVinc;
+    const y0 = Math.max(1, Math.ceil(S.pmin)), y1 = Math.max(y0, Math.min(40, Math.ceil(S.pmax)));
+    const ltvOpt = win.Lmin / S.precio * 100;
+    let l1 = Math.min(100, Math.ceil(Math.max(ltvOpt, S.ltvmax) / 1) + 0);
+    let l0 = Math.max(0, Math.floor(ltvOpt) - 14);
+    if (l1 - l0 < 10) l0 = Math.max(0, l1 - 15);
+    const rows = []; for (let l = l1; l >= l0; l--) rows.push(l);
+    const cols = []; for (let y = y0; y <= y1; y++) cols.push(y);
+    const cw = 18, ch = 16, padL = 44, padT = 8, padB = 30;
+    const W = padL + cols.length * cw + 4, H = padT + rows.length * ch + padB;
+    const celdas = [];
+    let lo = Infinity, hi = -Infinity;
+    rows.forEach((l) => cols.forEach((y) => {
+      const r = evalua(S.precio * l / 100, y * 12, tin, cv, B);
+      const v = objetivo(r);
+      if (!r.fallos.length) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+      celdas.push({ l, y, r, v });
+    }));
+    const css = getComputedStyle(document.documentElement);
+    const c0 = css.getPropertyValue("--heat-lo").trim(), c1 = css.getPropertyValue("--heat-hi").trim(), off = css.getPropertyValue("--off").trim(), fg = css.getPropertyValue("--fg").trim();
+    const mix = (t) => { const a = hex(c0), b = hex(c1); return `rgb(${a.map((x, i) => Math.round(x + (b[i] - x) * t)).join(",")})`; };
+    function hex(h) { h = h.replace("#", ""); if (h.length === 3) h = h.split("").map((x) => x + x).join(""); return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)); }
+    let svg = "";
+    celdas.forEach((c) => {
+      const x = padL + (c.y - y0) * cw, yy = padT + (l1 - c.l) * ch;
+      const fill = c.r.fallos.length ? off : mix(hi > lo ? Math.sqrt((c.v - lo) / (hi - lo)) : 0);
+      svg += `<rect x="${x + 1}" y="${yy + 1}" width="${cw - 2}" height="${ch - 2}" rx="2" fill="${fill}" data-l="${c.l}" data-y="${c.y}" tabindex="-1"/>`;
+    });
+    rows.forEach((l) => { if (l % 2 === 0) svg += `<text x="${padL - 6}" y="${padT + (l1 - l) * ch + ch / 2 + 4}" text-anchor="end" font-size="10">${l}%</text>`; });
+    cols.forEach((y) => { if (y % 5 === 0 || y === y0) svg += `<text x="${padL + (y - y0) * cw + cw / 2}" y="${padT + rows.length * ch + 14}" text-anchor="middle" font-size="10">${y}</text>`; });
+    svg += `<text x="${padL + cols.length * cw / 2}" y="${H - 2}" text-anchor="middle" font-size="10">años</text>`;
+    if (win.mejor && win.mejor.n) {
+      const yb = win.mejor.n / 12, lb = Math.ceil(ltvOpt - 1e-9);
+      if (yb >= y0 && yb <= y1 && lb >= l0 && lb <= l1)
+        svg += `<rect x="${padL + (yb - y0) * cw}" y="${padT + (l1 - lb) * ch}" width="${cw}" height="${ch}" rx="3" fill="none" stroke="${fg}" stroke-width="2.2"/>`;
+    }
+    $map.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    $map.innerHTML = svg;
+    $map.onclick = (e) => {
+      const t = e.target.closest("rect[data-l]"); if (!t) return;
+      const l = +t.dataset.l, y = +t.dataset.y;
+      const r = evalua(S.precio * l / 100, y * 12, tin, cv, B);
+      const why = { ahorro: "no te llega el ahorro", ltv: "pasa del LTV máximo", ratio: "pasa del ratio de deuda", plazo: "fuera del plazo permitido" };
+      $cell.innerHTML = `<b>${l} % · ${y} años</b>: préstamo ${eur(r.L)}, cuota ${eur2(r.q)}, intereses ${eur(r.intereses)}` +
+        (r.fallos.length ? ` · <span class="fail">no cumple: ${r.fallos.map((f) => why[f]).join(", ")}</span>` : "");
+    };
+    $cell.textContent = "";
+  }
+
+  function pintaCombos(validos, B) {
+    if (S.vmode === "fijas" || !validos.length) {
+      $combos.innerHTML = `<h3>Comparar vinculaciones</h3><p class="note">Elige «Elegir las que convengan» para probar todas las combinaciones de vinculaciones y ver cuál sale mejor.</p>`;
+      return;
+    }
+    const filas = validos.slice(0, 8).map((r, i) => {
+      const m = r.mejor;
+      return `<tr class="${i === 0 ? "best" : ""}"><td>${nombres(r.sel)}</td><td>${pct(r.tin, 2)}</td><td>${m.n / 12}</td><td>${eur2(m.q)}</td><td>${eur(m.intereses)}</td><td>${eur(m.costeV)}</td><td>${eur(m.intereses + m.costeV)}</td></tr>`;
+    }).join("");
+    $combos.innerHTML = `<h3>Combinaciones de vinculaciones</h3>
+      <div class="tablewrap"><table><thead><tr><th>Vinculaciones</th><th>TIN</th><th>Años</th><th>Cuota</th><th>Intereses</th><th>Coste vinc.</th><th>Total</th></tr></thead><tbody>${filas}</tbody></table></div>
+      <p class="note">Ordenadas por ${S.obj === "tot" ? "intereses + coste de las vinculaciones" : "intereses"}. Cada una con su préstamo mínimo y su plazo más corto que cumple el ratio.</p>`;
+  }
+
+  matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", run);
+  new MutationObserver(run).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  run();
+})();
+</script>
+</body>
+</html>
