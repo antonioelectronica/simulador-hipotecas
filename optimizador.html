@@ -83,6 +83,13 @@ button.x{border:0;background:none;color:var(--muted);padding:4px 6px;font-size:1
 .tips li{font-size:.88rem;padding-left:14px;position:relative}
 .tips li::before{content:"";position:absolute;left:0;top:.6em;width:6px;height:6px;border-radius:50%;background:var(--accent)}
 .fail{color:var(--bad)}
+.top{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+.top a{color:var(--accent);font-weight:500;text-decoration:none;font-size:.9rem;margin-right:auto}
+.top a:hover{text-decoration:underline}
+.acts{display:flex;flex-wrap:wrap;gap:8px}
+button.pri{background:var(--accent);border-color:var(--accent);color:var(--panel);font-weight:600}
+#aviso{font-size:.82rem;color:var(--accent)}
+#aviso:empty{display:none}
 h3{margin:0 0 8px;font:600 1rem var(--f-display)}
 .mapwrap{overflow-x:auto}
 #map{display:block;width:100%;min-width:560px;height:auto}
@@ -105,8 +112,10 @@ tr.best td{color:var(--accent);font-weight:600}
 <body>
 <div class="wrap">
   <header>
+    <nav class="top"><a id="toSim" href="https://antonioelectronica.github.io/simulador-hipotecas/">← Simulador</a><button type="button" id="imp" hidden>Traer datos del simulador</button></nav>
     <h1>Optimizador de hipoteca</h1>
     <p>Ajusta tus datos y la herramienta busca la entrada, el plazo y las vinculaciones que menos intereses te hacen pagar, cumpliendo tu ratio de deuda, la cuota máxima que quieras pagar, tu colchón y el LTV que te da el banco.</p>
+    <p id="aviso" aria-live="polite"></p>
   </header>
 
   <div class="cols">
@@ -322,6 +331,50 @@ tr.best td{color:var(--accent);font-weight:600}
     return res;
   }
 
+  // ---------- enlace con el simulador (mismo sitio: comparten el almacenamiento del navegador) ----------
+  const SIMKEY = "mortgage-simulator-storage";
+  const SIM = location.hostname.endsWith("github.io") ? "/simulador-hipotecas/" : /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "/" : null;
+  const leeSim = () => { try { return JSON.parse(localStorage.getItem(SIMKEY)); } catch { return null; } };
+  const aviso = (t) => { document.getElementById("aviso").textContent = t; };
+  if (SIM) document.getElementById("toSim").href = SIM;
+  if (SIM && leeSim()?.state) {
+    const imp = document.getElementById("imp"); imp.hidden = false;
+    imp.onclick = () => {
+      const st = leeSim()?.state; if (!st) return;
+      const f = st.currentForm || {}, u = st.userProfile || {}, c = f.upfrontCosts || {};
+      const set = (k, v) => { if (typeof v === "number" && isFinite(v)) S[k] = v; };
+      set("precio", f.propertyValue); set("tasacion", c.appraisal); set("notaria", c.notary); set("registro", c.registry);
+      if (f.loanType === "fijo") set("tin", f.tinAnnual);
+      set("ahorros", u.savings); set("ingresos", u.householdNetIncome); set("deudas", u.monthlyDebt); set("ratio", u.targetDTI); set("edad", u.age);
+      if (u.region === "Andalucía" && u.buyerType === "primera_vivienda" && u.age < 35) S.itp = 3.5;
+      if (Array.isArray(f.linkages) && f.linkages.length)
+        S.vinc = f.linkages.map((l) => ({ id: l.id, n: l.name, b: (l.discount_bps || 0) / 100, c: l.annualCost || 0, on: !!l.active }));
+      ids.forEach((k) => { const el = document.getElementById(k); el.value = (el.placeholder && !S[k]) ? "" : fmtIn(S[k]); el.dataset.prev = el.value; });
+      drawVinc(); run();
+      aviso("Datos traídos del simulador: precio, gastos, TIN, tu perfil y las vinculaciones.");
+    };
+  }
+  function exporta(win) {
+    const m = win.mejor, prev = leeSim() || { state: {}, version: 0 };
+    const st = prev.state || (prev.state = {});
+    // Si el simulador nunca se abrió en este navegador, se parte de sus valores por defecto
+    const f = Object.assign({ loanType: "fijo", graceMonths: 0, euriborAnnual: 2.5, spreadAnnual: 0.8, reviewPeriodMonths: 12, mixedFixedYears: 10, mixedFixedTinAnnual: 2.5,
+      openingFeePct: 0, openingFeeFixed: 0, upfrontCosts: { appraisal: 320, notary: 600, registry: 300, agency: 400, taxes: 0, other: 0 }, earlyRepayments: [],
+      bankCommissions: { openingFeePct: 0, partialAmortizationPct: 0, totalAmortizationPct: 0, subrogationPct: 0 } }, st.currentForm);
+    st.simulations = st.simulations || [];
+    st.userProfile = Object.assign({ region: "Andalucía", householdNetIncome: 4000, monthlyDebt: 0, targetDTI: 35, savings: 50000, borrowers: 2,
+      employment: "indefinido", buyerType: "primera_vivienda", age: 28, objective: "cuota_minima" }, st.userProfile);
+    st.currentForm = Object.assign({}, f, {
+      loanType: "fijo", propertyValue: S.precio, amount: Math.round(m.L * 100) / 100, ltv: Math.round(m.ltv * 100) / 100,
+      termMonths: m.n, graceMonths: 0, tinAnnual: S.tin,
+      upfrontCosts: Object.assign({}, f.upfrontCosts, { appraisal: S.tasacion, notary: S.notaria, registry: S.registro }),
+      linkages: S.vinc.map((v, i) => ({ id: v.id || ({ "nómina": "nomina", "seguro de vida": "seguro_vida", "seguro de hogar": "seguro_hogar", "alarma": "alarma" })[v.n.toLowerCase()] || "opt_" + i, name: v.n, discount_bps: Math.round(v.b * 100), active: win.sel.includes(v), annualCost: v.c })),
+    });
+    st.userProfile = Object.assign({}, st.userProfile, { savings: S.ahorros, householdNetIncome: S.ingresos, monthlyDebt: S.deudas, targetDTI: S.ratio, age: S.edad });
+    try { localStorage.setItem(SIMKEY, JSON.stringify(prev)); } catch { aviso("No se pudo guardar en el navegador."); return; }
+    location.href = SIM;
+  }
+
   // ---------- pintado ----------
   const $v = document.getElementById("verdict");
   const $map = document.getElementById("map");
@@ -394,7 +447,9 @@ tr.best td{color:var(--accent);font-weight:600}
         <div class="kpi"><b>${eur(m.entrada)}</b><small>Entrada (+ ${eur(B.gastos)} gastos)</small></div>
       </div>
       <div class="chips">${chips.map(([t, c]) => `<span class="chip ${c}"><i></i>${t}</span>`).join("")}</div>
-      <ul class="tips">${tips.map((t) => `<li>${t}</li>`).join("")}</ul>`;
+      <ul class="tips">${tips.map((t) => `<li>${t}</li>`).join("")}</ul>
+      ${SIM ? '<div class="acts"><button type="button" class="pri" id="exp">Abrir este óptimo en el simulador</button></div>' : ""}`;
+    if (SIM) document.getElementById("exp").onclick = () => exporta(win);
   }
 
   function pintaMapa(win, B) {
