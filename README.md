@@ -6,7 +6,6 @@ Simulador de cuota, TAE y coste total de una hipoteca, con:
 - Ahorro necesario: entrada + tasación + notaría + registro + ITP.
 - Vinculaciones con su bonificación y coste anual.
 - Campos de porcentaje que admiten coma decimal.
-- Guardado en la nube: botón «Nube» abajo a la derecha; guarda simulaciones, perfil y formulario en un gist privado de tu GitHub (token con permiso «gist» solamente).
 
 Abrir: https://antonioelectronica.github.io/simulador-hipotecas/
 
