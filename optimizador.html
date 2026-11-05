@@ -185,13 +185,22 @@ tr.best td{color:var(--accent);font-weight:600}
 
         <fieldset>
           <legend>Condiciones del banco</legend>
+          <div class="seg" role="radiogroup" aria-label="Tipo de hipoteca">
+            <label><input type="radio" name="tipo" value="fija" id="ti-fija">Fija</label>
+            <label><input type="radio" name="tipo" value="mixta" id="ti-mixta">Mixta</label>
+          </div>
           <div class="grid2">
-            <label class="f">TIN sin bonificar<span class="inp"><input id="tin" inputmode="decimal"><span>%</span></span></label>
+            <label class="f" id="f-tin">TIN sin bonificar<span class="inp"><input id="tin" inputmode="decimal"><span>%</span></span></label>
+            <label class="f mx">TIN periodo fijo sin bonificar<span class="inp"><input id="tinfijo" inputmode="decimal"><span>%</span></span></label>
+            <label class="f mx">Años a tipo fijo<span class="inp"><input id="fijoanos" inputmode="decimal"><span>años</span></span></label>
+            <label class="f mx">Euríbor previsto<span class="inp"><input id="euribor" inputmode="decimal"><span>%</span></span></label>
+            <label class="f mx">Diferencial sin bonificar<span class="inp"><input id="dif" inputmode="decimal"><span>%</span></span></label>
             <label class="f">LTV máximo<span class="inp"><input id="ltvmax" inputmode="decimal"><span>%</span></span></label>
             <label class="f">Plazo mínimo<span class="inp"><input id="pmin" inputmode="decimal"><span>años</span></span></label>
             <label class="f">Plazo máximo<span class="inp"><input id="pmax" inputmode="decimal"><span>años</span></span></label>
             <label class="f">Edad máx. al terminar<span class="inp"><input id="edadmax" inputmode="decimal"><span>años</span></span></label>
           </div>
+          <p class="note mx">Pon el TIN de la oferta, no la TAE: la TAE incluye gastos y seguros y no sirve para calcular la cuota. Las bonificaciones se restan del TIN fijo y del diferencial. El Euríbor es una previsión y se mantiene constante.</p>
         </fieldset>
 
         <fieldset>
@@ -256,6 +265,7 @@ tr.best td{color:var(--accent);font-weight:600}
     precio: 140000, valortas: 0, itp: 3.5, tasacion: 320, notaria: 600, registro: 300, otros: 0,
     ahorros: 30000, colchon: 5000, ingresos: 2593, deudas: 0, ratio: 30, cuotamax: 0, edad: 28,
     tin: 3.9, ltvmax: 100, pmin: 5, pmax: 40, edadmax: 75,
+    tipo: "fija", tinfijo: 2.5, fijoanos: 10, euribor: 2.5, dif: 0.8,
     vmode: "fijas", obj: "int", verTotal: false, extras: [],
     vinc: [
       { n: "Nómina", b: 0.35, c: 0, on: true },
@@ -269,6 +279,7 @@ tr.best td{color:var(--accent);font-weight:600}
   try { S = JSON.parse(localStorage.getItem(KEY)) || null; } catch { S = null; }
   S = Object.assign(structuredClone(DEF), S || {});
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch {} };
+  const esMixta = () => S.tipo === "mixta";
 
   const nf0 = new Intl.NumberFormat("es-ES", { maximumFractionDigits: 0, useGrouping: "always" });
   const nf2 = new Intl.NumberFormat("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: "always" });
@@ -279,7 +290,7 @@ tr.best td{color:var(--accent);font-weight:600}
   const num = (t) => { t = String(t).trim(); if (/,/.test(t)) t = t.replace(/\./g, "").replace(",", "."); else if (/^\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, ""); const v = parseFloat(t); return isNaN(v) ? NaN : v; };
 
   // ---------- campos ----------
-  const ids = ["precio","valortas","itp","tasacion","notaria","registro","otros","ahorros","colchon","ingresos","deudas","ratio","cuotamax","edad","tin","ltvmax","pmin","pmax","edadmax"];
+  const ids = ["precio","valortas","itp","tasacion","notaria","registro","otros","ahorros","colchon","ingresos","deudas","ratio","cuotamax","edad","tin","tinfijo","fijoanos","euribor","dif","ltvmax","pmin","pmax","edadmax"];
   const okText = (t) => /^-?[\d.,]*$/.test(t);
   function bindNum(el, get, set) {
     const show = (v) => (el.placeholder && !v) ? "" : fmtIn(v);
@@ -300,6 +311,13 @@ tr.best td{color:var(--accent);font-weight:600}
   document.getElementById("ob-" + S.obj).checked = true;
   document.querySelectorAll("input[name=vmode]").forEach((r) => r.addEventListener("change", () => { S.vmode = r.value; run(); }));
   document.querySelectorAll("input[name=obj]").forEach((r) => r.addEventListener("change", () => { S.obj = r.value; run(); }));
+  function syncTipo() {
+    document.getElementById("ti-" + S.tipo).checked = true;
+    document.getElementById("f-tin").style.display = esMixta() ? "none" : "";
+    document.querySelectorAll(".mx").forEach((el) => { el.style.display = esMixta() ? "" : "none"; });
+  }
+  document.querySelectorAll("input[name=tipo]").forEach((r) => r.addEventListener("change", () => { S.tipo = r.value; syncTipo(); run(); }));
+  syncTipo();
 
   const vbox = document.getElementById("vinc");
   function drawVinc() {
@@ -352,7 +370,22 @@ tr.best td{color:var(--accent);font-weight:600}
 
   // ---------- cálculo ----------
   const cuota = (L, tin, n) => { const i = tin / 1200; return i === 0 ? L / n : L * i / (1 - Math.pow(1 + i, -n)); };
-  const prestamoMax = (q, tin, n) => { const i = tin / 1200; return i === 0 ? q * n : q * (1 - Math.pow(1 + i, -n)) / i; };
+  const tinBase = () => esMixta() ? S.tinfijo : S.tin;
+  // Tipo tras el periodo fijo: Euríbor más el diferencial, con las mismas bonificaciones que el fijo
+  const tinVar = (tin, eu) => Math.max(0, eu + Math.max(0, S.dif - (tinBase() - tin)));
+  // Cuotas e intereses. En mixta, al acabar el periodo fijo se recalcula la cuota sobre el saldo pendiente
+  function plan(L, tin, n, eu = S.euribor) {
+    const q = cuota(L, tin, n);
+    const nf = Math.max(1, Math.round(S.fijoanos * 12));
+    if (!esMixta() || n <= nf) return { q, qVar: null, nf: n, intereses: q * n - L };
+    const i = tin / 1200, f = Math.pow(1 + i, nf);
+    const saldo = i === 0 ? L - q * nf : L * f - q * (f - 1) / i;
+    const qVar = cuota(saldo, tinVar(tin, eu), n - nf);
+    return { q, qVar, nf, intereses: q * nf + qVar * (n - nf) - L };
+  }
+  const pico = (L, tin, n) => { const p = plan(L, tin, n); return Math.max(p.q, p.qVar ?? 0); };
+  const pagoMedio = (L, tin, n) => (L + plan(L, tin, n).intereses) / n;
+  const prestamoMax = (q, tin, n) => q / pico(1, tin, n);
 
   // El banco financia sobre el menor entre precio y tasación
   const baseBanco = () => S.valortas > 0 ? Math.min(S.precio, S.valortas) : S.precio;
@@ -377,17 +410,18 @@ tr.best td{color:var(--accent);font-weight:600}
     return { gastos, disp, entradaMax, qratio, qmax, limCuota, plazoTope };
   }
   function evalua(L, n, tin, costeVinc, B, costeExt = 0, costeAuto = 0) {
-    const q = cuota(L, tin, n);
-    const intereses = q * n - L;
+    const p = plan(L, tin, n);
+    const q = p.q, qVar = p.qVar, nf = p.nf, intereses = p.intereses;
+    const qPico = Math.max(q, qVar ?? 0);
     const ltv = L / baseBanco() * 100;
     const entrada = S.precio - L;
     const fallos = [];
     if (entrada > B.entradaMax + 0.5) fallos.push("ahorro");
     if (ltv > S.ltvmax + 1e-9) fallos.push("ltv");
-    if (q > B.qratio + 1e-6) fallos.push("ratio");
-    if (S.cuotamax > 0 && q > S.cuotamax + 1e-6) fallos.push("cuota");
+    if (qPico > B.qratio + 1e-6) fallos.push("ratio");
+    if (S.cuotamax > 0 && qPico > S.cuotamax + 1e-6) fallos.push("cuota");
     if (n / 12 > B.plazoTope || n / 12 < S.pmin) fallos.push("plazo");
-    return { L, n, q, intereses, ltv, entrada, costeV: costeVinc * n / 12, costeE: costeExt * n / 12, costeA: costeAuto * n / 12, fallos };
+    return { L, n, q, qVar, nf, qPico, intereses, ltv, entrada, costeV: costeVinc * n / 12, costeE: costeExt * n / 12, costeA: costeAuto * n / 12, fallos };
   }
   // Los productos con dos precios se comparan siempre por dinero, también al minimizar solo intereses
   const objetivo = (r) => S.obj === "tot" ? r.intereses + r.costeV + r.costeE : r.intereses + r.costeA;
@@ -407,7 +441,7 @@ tr.best td{color:var(--accent);font-weight:600}
   // Óptimo de una combinación: el préstamo mínimo posible y el plazo más corto que cumpla el ratio
   function optimo(sel, B) {
     const bon = sel.reduce((a, v) => a + (v.b || 0), 0);
-    const tin = Math.max(0, S.tin - bon);
+    const tin = Math.max(0, tinBase() - bon);
     const costeVinc = sel.reduce((a, v) => a + (v.c || 0), 0);
     const Lmin = Math.max(0, S.precio - Math.max(0, B.entradaMax));
     const ext = S.vinc.filter((v) => esAuto(v) && !sel.includes(v));
@@ -415,7 +449,7 @@ tr.best td{color:var(--accent);font-weight:600}
     const costeAuto = S.vinc.filter(esAuto).reduce((a, v) => a + (sel.includes(v) ? v.c : v.f), 0);
     const res = { sel, ext, tin, costeVinc, costeExt, costeAuto, Lmin, mejor: null, motivo: null };
     if (B.entradaMax < entradaMin() - 0.5) { res.motivo = "ahorro-ltv"; return res; }
-    if (Lmin === 0) { res.mejor = { L: 0, n: 0, q: 0, intereses: 0, ltv: 0, entrada: S.precio, costeV: 0, costeE: 0, costeA: 0, fallos: [] }; return res; }
+    if (Lmin === 0) { res.mejor = { L: 0, n: 0, q: 0, qVar: null, nf: 0, qPico: 0, intereses: 0, ltv: 0, entrada: S.precio, costeV: 0, costeE: 0, costeA: 0, fallos: [] }; return res; }
     let best = null;
     const tope = Math.floor(B.plazoTope);
     for (let y = Math.ceil(S.pmin); y <= tope; y++) {
@@ -456,14 +490,17 @@ tr.best td{color:var(--accent);font-weight:600}
       const f = st.currentForm || {}, u = st.userProfile || {}, c = f.upfrontCosts || {};
       const set = (k, v) => { if (typeof v === "number" && isFinite(v)) S[k] = v; };
       set("precio", f.propertyValue); set("tasacion", c.appraisal); set("notaria", c.notary); set("registro", c.registry);
-      if (f.loanType === "fijo") set("tin", f.tinAnnual);
+      if (f.loanType === "fijo") { S.tipo = "fija"; set("tin", f.tinAnnual); }
+      if (f.loanType === "mixto") { S.tipo = "mixta"; set("tinfijo", f.mixedFixedTinAnnual); set("fijoanos", f.mixedFixedYears); set("euribor", f.euriborAnnual); set("dif", f.spreadAnnual); }
       set("ahorros", u.savings); set("ingresos", u.householdNetIncome); set("deudas", u.monthlyDebt); set("ratio", u.targetDTI); set("edad", u.age);
       if (u.region === "Andalucía" && u.buyerType === "primera_vivienda" && u.age < 35) S.itp = 3.5;
       if (Array.isArray(f.linkages) && f.linkages.length)
         S.vinc = f.linkages.map((l) => ({ id: l.id, n: l.name, b: (l.discount_bps || 0) / 100, c: l.annualCost || 0, on: !!l.active, f: (S.vinc.find((x) => x.n === l.name) || {}).f || 0 }));
       ids.forEach((k) => { const el = document.getElementById(k); el.value = (el.placeholder && !S[k]) ? "" : fmtIn(S[k]); el.dataset.prev = el.value; });
-      compSig = null; drawVinc(); run();
-      aviso("Datos traídos del simulador: precio, gastos, TIN, tu perfil y las vinculaciones.");
+      syncTipo(); compSig = null; drawVinc(); run();
+      aviso(f.loanType === "variable"
+        ? "Datos traídos del simulador, salvo el tipo: el optimizador no calcula hipotecas solo variables."
+        : "Datos traídos del simulador: precio, gastos, TIN, tu perfil y las vinculaciones.");
     };
   }
   function exporta(win) {
@@ -477,8 +514,9 @@ tr.best td{color:var(--accent);font-weight:600}
     st.userProfile = Object.assign({ region: "Andalucía", householdNetIncome: 4000, monthlyDebt: 0, targetDTI: 35, savings: 50000, borrowers: 2,
       employment: "indefinido", buyerType: "primera_vivienda", age: 28, objective: "cuota_minima" }, st.userProfile);
     st.currentForm = Object.assign({}, f, {
-      loanType: "fijo", propertyValue: S.precio, amount: Math.round(m.L * 100) / 100, ltv: Math.round(m.L / S.precio * 10000) / 100,
+      loanType: esMixta() ? "mixto" : "fijo", propertyValue: S.precio, amount: Math.round(m.L * 100) / 100, ltv: Math.round(m.L / S.precio * 10000) / 100,
       termMonths: m.n, graceMonths: 0, tinAnnual: S.tin,
+      ...(esMixta() ? { mixedFixedTinAnnual: S.tinfijo, mixedFixedYears: S.fijoanos, euriborAnnual: S.euribor, spreadAnnual: S.dif } : {}),
       upfrontCosts: Object.assign({}, f.upfrontCosts, { appraisal: S.tasacion, notary: S.notaria, registry: S.registro }),
       linkages: S.vinc.map((v, i) => ({ id: v.id || ({ "nómina": "nomina", "seguro de vida": "seguro_vida", "seguro de hogar": "seguro_hogar", "alarma": "alarma" })[v.n.toLowerCase()] || "opt_" + i, name: v.n, discount_bps: Math.round(v.b * 100), active: win.sel.includes(v), annualCost: v.c })),
     });
@@ -532,7 +570,7 @@ tr.best td{color:var(--accent);font-weight:600}
         msg = "Tus otras deudas ya superan el ratio máximo: no queda cuota disponible.";
       } else {
         const n = Math.floor(B.plazoTope) * 12;
-        const q = cuota(r.Lmin, r.tin, n);
+        const q = pico(r.Lmin, r.tin, n);
         const ingNec = (q + S.deudas) / (S.ratio / 100);
         const Lok = prestamoMax(B.qmax, r.tin, n);
         msg = B.limCuota
@@ -545,8 +583,8 @@ tr.best td{color:var(--accent);font-weight:600}
     const m = win.mejor, y = m.n / 12;
     const colchonReal = S.ahorros - B.gastos - m.entrada;
     const chips = [
-      [`Ratio de deuda ${pct((m.q + S.deudas) / S.ingresos * 100)} de ${pct(S.ratio, 0)}`, (m.q + S.deudas) / S.ingresos * 100 > S.ratio - 1 ? "w" : ""],
-      ...(S.cuotamax > 0 ? [[`Cuota ${eur2(m.q)} de ${eur(S.cuotamax)} máx.`, m.q > S.cuotamax * 0.97 ? "w" : ""]] : []),
+      [`Ratio de deuda ${pct((m.qPico + S.deudas) / S.ingresos * 100)} de ${pct(S.ratio, 0)}`, (m.qPico + S.deudas) / S.ingresos * 100 > S.ratio - 1 ? "w" : ""],
+      ...(S.cuotamax > 0 ? [[`Cuota ${eur2(m.qPico)} de ${eur(S.cuotamax)} máx.`, m.qPico > S.cuotamax * 0.97 ? "w" : ""]] : []),
       [`Colchón ${eur(colchonReal)}`, ""],
       [`LTV ${pct(m.ltv)} de ${pct(S.ltvmax, 0)} máx.`, m.ltv > 80 ? "w" : ""],
       ...(baseBanco() < S.precio ? [[`Tasación ${eur(S.precio - baseBanco())} por debajo del precio`, "w"]] : []),
@@ -568,6 +606,23 @@ tr.best td{color:var(--accent);font-weight:600}
     if (win.costeVinc > 0) tips.push(`Las vinculaciones elegidas cuestan ${eur(win.costeVinc)} al año: ${eur(m.costeV)} en todo el plazo.`);
     if (win.costeExt > 0) tips.push(`Los seguros elegidos por tu cuenta cuestan ${eur(win.costeExt)} al año: ${eur(m.costeE)} en todo el plazo.`);
 
+    // Mixta: cómo queda la parte variable según el Euríbor
+    let bloqueMixta = "";
+    if (esMixta() && m.n) {
+      if (m.qVar == null) {
+        bloqueMixta = `<p class="note">A ${y} años toda la hipoteca queda dentro del periodo fijo: el Euríbor no le afecta.</p>`;
+      } else {
+        const aF = m.nf / 12, aV = y - aF;
+        const filas = [["optimista", S.euribor - 1], ["previsto", S.euribor], ["adverso", S.euribor + 2]].map(([t, eu]) => {
+          const p = plan(m.L, win.tin, m.n, eu);
+          if (t === "adverso" && p.qVar > B.qmax + 1e-6) tips.push(`Con el Euríbor al ${pct(eu, 2)} la cuota variable sería ${eur2(p.qVar)}, por encima de tu máximo de ${eur2(B.qmax)}.`);
+          return `<dt>Euríbor ${t} ${pct(eu, 2)}, TIN ${pct(tinVar(win.tin, eu), 2)}</dt><dd>${eur2(p.qVar)}/mes · ${eur(p.intereses)} int.</dd>`;
+        }).join("");
+        bloqueMixta = `<dl class="desg"><dt class="sum">Primeros ${aF} años, TIN ${pct(win.tin, 2)}</dt><dd class="sum">${eur2(m.q)}/mes</dd>
+          <dt class="sum">Últimos ${aV} años, según el Euríbor</dt><dd class="sum"></dd>${filas}</dl>
+          <p class="note">Los intereses totales del óptimo usan el Euríbor previsto. El ratio y la cuota máxima se comprueban con la cuota más alta de los dos tramos, también con ese Euríbor.</p>`;
+      }
+    }
     const total = cuotaTotal(m.q, win);
     const ct = costeTotal(m), cSeguros = ct - m.intereses;
     const bloqueCoste = `<div class="ctotal"><span>Coste total en ${y} años</span><b>${eur(ct)}</b>
@@ -577,11 +632,12 @@ tr.best td{color:var(--accent);font-weight:600}
     const desglose = !S.verTotal ? "" : !hayCostes
       ? '<p class="note">Todavía no hay costes que sumar: marca una vinculación con coste o añade un seguro por tu cuenta.</p>'
       : `<dl class="desg">
-          <dt>Cuota de la hipoteca</dt><dd>${eur2(m.q)}</dd>
+          <dt>Cuota de la hipoteca${m.qVar != null ? " (periodo fijo)" : ""}</dt><dd>${eur2(m.q)}</dd>
           ${conCoste.map((v) => `<dt>${esc(v.n)} (vinculación)</dt><dd>${eur2(v.c / 12)}</dd>`).join("")}
           ${win.ext.map((v) => `<dt>${esc(v.n)} (por tu cuenta)</dt><dd>${eur2(v.f / 12)}</dd>`).join("")}
           ${extrasActivos().map((e) => `<dt>${esc(e.n)} (por tu cuenta)</dt><dd>${eur2(e.m)}</dd>`).join("")}
-          <dt class="sum">Cuota total al mes</dt><dd class="sum">${eur2(total)}</dd>
+          <dt class="sum">Cuota total al mes${m.qVar != null ? " (periodo fijo)" : ""}</dt><dd class="sum">${eur2(total)}</dd>
+          ${m.qVar != null ? `<dt class="sum">Cuota total después, con el Euríbor previsto</dt><dd class="sum">${eur2(cuotaTotal(m.qVar, win))}</dd>` : ""}
         </dl>
         <p class="note">Supone el ${pct(S.ingresos > 0 ? (total + S.deudas) / S.ingresos * 100 : 0)} de tus ingresos, contando otras deudas. El ratio de deuda y la cuota máxima se siguen comprobando solo con la cuota de la hipoteca.</p>`;
 
@@ -590,11 +646,12 @@ tr.best td{color:var(--accent);font-weight:600}
       <label class="toggle"><input type="checkbox" id="vertotal"${S.verTotal ? " checked" : ""}>Ver cuota total</label>
       <div class="kpis">
         <div class="kpi main"><b>${eur(m.intereses)}</b><small>Intereses totales</small></div>
-        <div class="kpi"><b>${eur2(S.verTotal ? total : m.q)}</b><small>${S.verTotal ? "Cuota total al mes" : "Cuota al mes"}</small></div>
-        <div class="kpi"><b>${pct(win.tin, 2)}</b><small>TIN bonificado</small></div>
+        <div class="kpi"><b>${eur2(S.verTotal ? total : m.q)}</b><small>${S.verTotal ? "Cuota total al mes" : "Cuota al mes"}${m.qVar != null ? ", periodo fijo" : ""}</small></div>
+        <div class="kpi"><b>${pct(win.tin, 2)}</b><small>${esMixta() ? "TIN fijo bonificado" : "TIN bonificado"}</small></div>
         <div class="kpi"><b>${eur(m.entrada)}</b><small>Entrada (+ ${eur(B.gastos)} gastos)</small></div>
       </div>
       ${bloqueCoste}
+      ${bloqueMixta}
       ${desglose}
       <div class="chips">${chips.map(([t, c]) => `<span class="chip ${c}"><i></i>${t}</span>`).join("")}</div>
       <ul class="tips">${tips.map((t) => `<li>${t}</li>`).join("")}</ul>
@@ -632,16 +689,15 @@ tr.best td{color:var(--accent);font-weight:600}
     $comp.querySelectorAll(".crow").forEach((row) => {
       const v = S.vinc[+row.dataset.i], f = v.f || 0;
       const bonOtras = win.sel.filter((x) => x !== v).reduce((a, x) => a + (x.b || 0), 0);
-      const qSin = cuota(m.L, Math.max(0, S.tin - bonOtras), m.n);
-      const qCon = cuota(m.L, Math.max(0, S.tin - bonOtras - (v.b || 0)), m.n);
+      const qSin = pico(m.L, Math.max(0, tinBase() - bonOtras), m.n);
       const nRef = win.nRef || m.n;
-      const ahorro = (cuota(m.L, Math.max(0, S.tin - bonOtras), nRef) - cuota(m.L, Math.max(0, S.tin - bonOtras - (v.b || 0)), nRef)) * 12;
+      const ahorro = (pagoMedio(m.L, Math.max(0, tinBase() - bonOtras), nRef) - pagoMedio(m.L, Math.max(0, tinBase() - bonOtras - (v.b || 0)), nRef)) * 12;
       const neto = v.c - ahorro;
       const dentro = win.sel.includes(v);
       const real = neto < 0 ? `Cuesta ${eur(v.c)}, así que te sobran ${eur(-neto)} al año,` : `Te cuesta ${eur(neto)} al año`;
       const marca = S.vmode === "todas" ? "elige «Solo las marcadas» y " : "";
       let veredicto = "", detalle = "", pista = "";
-      const base = `La bonificación te ahorra <b>${eur(ahorro)}</b> al año.`;
+      const base = `La bonificación te ahorra <b>${eur(ahorro)}</b> al año${esMixta() ? " de media" : ""}.`;
       if (f > 0) {
         const otra = optimo(dentro ? win.sel.filter((x) => x !== v) : S.vinc.filter((x) => win.sel.includes(x) || x === v), B);
         veredicto = dentro ? '<span class="cv bank">Elegido: con el banco</span>' : '<span class="cv out">Elegido: por tu cuenta</span>';
@@ -717,7 +773,7 @@ tr.best td{color:var(--accent);font-weight:600}
       const l = +t.dataset.l, y = +t.dataset.y;
       const r = evalua(baseBanco() * l / 100, y * 12, tin, cv, B, win.costeExt, win.costeAuto);
       const why = { ahorro: "no te llega el ahorro", ltv: "pasa del LTV máximo", ratio: "pasa del ratio de deuda", cuota: "pasa de tu cuota máxima", plazo: "fuera del plazo permitido" };
-      $cell.innerHTML = `<b>${l} % · ${y} años</b>: préstamo ${eur(r.L)}, cuota ${eur2(r.q)}${S.verTotal ? `, cuota total ${eur2(cuotaTotal(r.q, win))}` : ""}, intereses ${eur(r.intereses)}, coste total ${eur(costeTotal(r))}` +
+      $cell.innerHTML = `<b>${l} % · ${y} años</b>: préstamo ${eur(r.L)}, cuota ${eur2(r.q)}${S.verTotal ? `, cuota total ${eur2(cuotaTotal(r.q, win))}` : ""}${r.qVar != null ? `, luego ${eur2(r.qVar)}` : ""}, intereses ${eur(r.intereses)}, coste total ${eur(costeTotal(r))}` +
         (r.fallos.length ? ` · <span class="fail">no cumple: ${r.fallos.map((f) => why[f]).join(", ")}</span>` : "");
     };
     $cell.textContent = "";
@@ -733,7 +789,7 @@ tr.best td{color:var(--accent);font-weight:600}
       return `<tr class="${i === 0 ? "best" : ""}"><td>${nombres(r)}</td><td>${pct(r.tin, 2)}</td><td>${m.n / 12}</td><td>${eur2(m.q)}</td>${S.verTotal ? `<td>${eur2(cuotaTotal(m.q, r))}</td>` : ""}<td>${eur(m.intereses)}</td><td>${eur(costeTotal(m) - m.intereses)}</td><td>${eur(costeTotal(m))}</td></tr>`;
     }).join("");
     $combos.innerHTML = `<h3>Combinaciones de vinculaciones</h3>
-      <div class="tablewrap"><table><thead><tr><th>Vinculaciones</th><th>TIN</th><th>Años</th><th>Cuota</th>${S.verTotal ? "<th>Cuota total</th>" : ""}<th>Intereses</th><th>Costes</th><th>Coste total</th></tr></thead><tbody>${filas}</tbody></table></div>
+      <div class="tablewrap"><table><thead><tr><th>Vinculaciones</th><th>${esMixta() ? "TIN fijo" : "TIN"}</th><th>Años</th><th>${esMixta() ? "Cuota fija" : "Cuota"}</th>${S.verTotal ? "<th>Cuota total</th>" : ""}<th>Intereses</th><th>Costes</th><th>Coste total</th></tr></thead><tbody>${filas}</tbody></table></div>
       <p class="note">Ordenadas por ${S.obj === "tot" ? "intereses + costes" : S.vinc.some(esAuto) ? "intereses + coste de los productos con precio de fuera" : "intereses"}. Cada una con su préstamo mínimo y su plazo más corto que cumple el ratio y la cuota máxima.</p>`;
   }
 
