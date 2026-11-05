@@ -58,6 +58,24 @@ label.f{display:grid;gap:3px;font-size:.82rem;color:var(--muted);min-width:0}
 .desg dt{color:var(--muted)}
 .desg dd{font-family:var(--f-num);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;padding-left:12px}
 .desg .sum{color:var(--fg);font-weight:600;border-bottom:0}
+.crows{display:grid;gap:0;margin-top:4px}
+.crow{display:grid;gap:8px;padding:12px 0;border-bottom:1px solid var(--line);min-width:0}
+.crow:last-child{border-bottom:0}
+.chead{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,150px);gap:6px 12px;align-items:center}
+.chead b{font-weight:600;min-width:0;overflow-wrap:anywhere}
+.chead .cb{font-size:.82rem;color:var(--muted);white-space:nowrap}
+.chead .cb span{font-family:var(--f-num);color:var(--fg)}
+.chead .inp{height:34px;padding:0 7px}
+.chead .inp input{font-size:13px}
+.chead .inp input::placeholder{color:var(--muted)}
+.cres{margin:0;font-size:.86rem;color:var(--muted)}
+.cres b{color:var(--fg);font-weight:600}
+.cv{display:block;font-weight:600;font-size:.95rem;margin-bottom:2px;color:var(--fg)}
+.cv.bank{color:var(--ok)}
+.cv.out{color:var(--warn)}
+.cwarn{display:block;color:var(--warn);margin-top:3px}
+.chint{display:block;margin-top:3px}
+@media (max-width:480px){.chead{grid-template-columns:minmax(0,1fr) auto}.chead .inp{grid-column:1/-1}}
 input[type=checkbox]{width:20px;height:20px;accent-color:var(--accent);margin:0}
 button{font:500 .85rem var(--f-body);border-radius:9px;border:1px solid var(--line);background:var(--panel);color:var(--fg);padding:7px 12px;cursor:pointer}
 button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -204,6 +222,12 @@ tr.best td{color:var(--accent);font-weight:600}
 
     <div class="res">
       <section class="verdict" id="verdict" aria-live="polite"></section>
+      <section class="panel">
+        <h3>¿Banco o por tu cuenta?</h3>
+        <p class="note">Compara cada producto con el precio que encuentres fuera, con el préstamo y el plazo del óptimo. El coste real con el banco es su precio menos lo que ahorras con la bonificación. Escribe el precio anual de fuera, por cobertura equivalente.</p>
+        <div class="crows" id="comp"></div>
+        <p class="note">Supone precios constantes durante todo el plazo. Las primas pueden subir con los años, sobre todo la de vida. Este panel no cambia el óptimo ni la cuota total.</p>
+      </section>
       <section class="panel">
         <h3>Mapa de plazo y LTV</h3>
         <p class="note">Cada casilla es una combinación de años y porcentaje financiado (sobre el menor entre precio y tasación) con las vinculaciones del óptimo. Cuanto más verde, menos intereses. Las grises incumplen alguna condición. Toca una casilla para ver el detalle.</p>
@@ -405,9 +429,9 @@ tr.best td{color:var(--accent);font-weight:600}
       set("ahorros", u.savings); set("ingresos", u.householdNetIncome); set("deudas", u.monthlyDebt); set("ratio", u.targetDTI); set("edad", u.age);
       if (u.region === "Andalucía" && u.buyerType === "primera_vivienda" && u.age < 35) S.itp = 3.5;
       if (Array.isArray(f.linkages) && f.linkages.length)
-        S.vinc = f.linkages.map((l) => ({ id: l.id, n: l.name, b: (l.discount_bps || 0) / 100, c: l.annualCost || 0, on: !!l.active }));
+        S.vinc = f.linkages.map((l) => ({ id: l.id, n: l.name, b: (l.discount_bps || 0) / 100, c: l.annualCost || 0, on: !!l.active, f: (S.vinc.find((x) => x.n === l.name) || {}).f || 0 }));
       ids.forEach((k) => { const el = document.getElementById(k); el.value = (el.placeholder && !S[k]) ? "" : fmtIn(S[k]); el.dataset.prev = el.value; });
-      drawVinc(); run();
+      compSig = null; drawVinc(); run();
       aviso("Datos traídos del simulador: precio, gastos, TIN, tu perfil y las vinculaciones.");
     };
   }
@@ -437,6 +461,8 @@ tr.best td{color:var(--accent);font-weight:600}
   const $map = document.getElementById("map");
   const $cell = document.getElementById("cell");
   const $combos = document.getElementById("combos");
+  const $comp = document.getElementById("comp");
+  let compSig = null;
   const nombres = (sel) => sel.length ? sel.map((v) => v.n).join(" + ") : "Sin vinculaciones";
 
   function run() {
@@ -446,6 +472,7 @@ tr.best td{color:var(--accent);font-weight:600}
     const validos = lista.filter((r) => r.mejor).sort((a, b) => objetivo(a.mejor) - objetivo(b.mejor));
     const win = validos[0];
     pintaVeredicto(win, lista, B);
+    pintaComp(win, B);
     pintaMapa(win || lista[0], B);
     pintaCombos(validos, B);
   }
@@ -527,6 +554,71 @@ tr.best td{color:var(--accent);font-weight:600}
     document.getElementById("vertotal").addEventListener("change", (e) => {
       S.verTotal = e.target.checked; run();
       document.getElementById("vertotal").focus();
+    });
+  }
+
+  // Cada fila se conserva mientras no cambie la lista, para no perder el foco al escribir
+  function pintaComp(win, B) {
+    if (!win || !win.mejor || !win.mejor.n) {
+      compSig = null;
+      $comp.innerHTML = '<p class="note">La comparación aparecerá cuando haya una hipoteca que cumpla todas las condiciones.</p>';
+      return;
+    }
+    const idx = S.vinc.map((v, i) => v.c > 0 ? i : -1).filter((i) => i >= 0);
+    const sig = idx.join();
+    if (sig !== compSig) {
+      compSig = sig;
+      $comp.innerHTML = "";
+      if (!idx.length) $comp.innerHTML = '<p class="note">Ninguna vinculación tiene coste: pon su precio anual en Vinculaciones para compararla.</p>';
+      idx.forEach((i) => {
+        const row = document.createElement("div"); row.className = "crow"; row.dataset.i = i;
+        row.innerHTML = `<div class="chead"><b class="cn"></b><span class="cb">Banco <span class="cp"></span></span>
+          <label class="inp"><input inputmode="decimal" placeholder="Fuera" aria-label="Precio fuera al año"><span>€/año</span></label></div>
+          <p class="cres"></p>`;
+        $comp.appendChild(row);
+        bindNum(row.querySelector("input"), () => S.vinc[i].f || 0, (x) => { S.vinc[i].f = x; });
+      });
+    }
+    const m = win.mejor, y = m.n / 12;
+    $comp.querySelectorAll(".crow").forEach((row) => {
+      const v = S.vinc[+row.dataset.i], f = v.f || 0;
+      const bonOtras = win.sel.filter((x) => x !== v).reduce((a, x) => a + (x.b || 0), 0);
+      const qSin = cuota(m.L, Math.max(0, S.tin - bonOtras), m.n);
+      const qCon = cuota(m.L, Math.max(0, S.tin - bonOtras - (v.b || 0)), m.n);
+      const ahorro = (qSin - qCon) * 12;
+      const neto = v.c - ahorro;
+      const dentro = win.sel.includes(v);
+      const marca = S.vmode === "todas" ? "elige «Solo las marcadas» y " : "";
+      let veredicto = "", detalle = "", pista = "";
+      const base = `La bonificación te ahorra <b>${eur(ahorro)}</b> al año.`;
+      const real = neto < 0 ? `Cuesta ${eur(v.c)}, así que te sobran ${eur(-neto)} al año,` : `Te cuesta ${eur(neto)} al año`;
+      if (f > 0) {
+        const dif = f - neto;
+        const plazo = `<b>${eur(Math.abs(dif))}</b> al año (${eur(Math.abs(dif) / 12)} al mes) y <b>${eur(Math.abs(dif) * y)}</b> en ${y} años`;
+        if (dif > 0.5) {
+          veredicto = '<span class="cv bank">Mejor con el banco</span>';
+          detalle = `${base} ${real} frente a ${eur(f)} fuera: ahorras ${plazo}.`;
+          if (!dentro) pista = `Para aplicarlo, ${marca}márcala en Vinculaciones.`;
+        } else if (dif < -0.5) {
+          veredicto = '<span class="cv out">Mejor por tu cuenta</span>';
+          detalle = `${base} ${real} frente a ${eur(f)} fuera: ahorras ${plazo}.`;
+          if (dentro) pista = `Para aplicarlo, ${marca}desmárcala en Vinculaciones y añádelo a «Seguros por tu cuenta».`;
+        } else {
+          veredicto = '<span class="cv">Prácticamente igual</span>';
+          detalle = `${base} ${real} con el banco, frente a ${eur(f)} fuera.`;
+        }
+      } else if (neto <= 0) {
+        veredicto = '<span class="cv bank">La bonificación paga el producto</span>';
+        detalle = `${base} Cuesta ${eur(v.c)}, así que te sobran <b>${eur(-neto)}</b> al año. Renta incluso si no lo necesitaras.`;
+        if (!dentro) pista = `Para aplicarlo, ${marca}márcala en Vinculaciones.`;
+      } else {
+        detalle = `${base} Su coste real es <b>${eur(neto)}</b> al año. Renta con el banco si fuera cuesta más de esa cifra; si no lo necesitas, no renta.`;
+      }
+      const aviso = qSin > B.qmax + 1e-6 && !(f > 0 && f - neto > 0.5)
+        ? `<span class="cwarn">Sin esta bonificación la cuota sería ${eur2(qSin)} y superaría tu máximo de ${eur2(B.qmax)} a ${y} años: tendrías que alargar el plazo.</span>` : "";
+      row.querySelector(".cn").textContent = v.n;
+      row.querySelector(".cp").textContent = eur(v.c) + "/año";
+      row.querySelector(".cres").innerHTML = veredicto + detalle + aviso + (pista ? `<span class="chint">${pista}</span>` : "");
     });
   }
 
