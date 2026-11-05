@@ -58,6 +58,10 @@ label.f{display:grid;gap:3px;font-size:.82rem;color:var(--muted);min-width:0}
 .desg dt{color:var(--muted)}
 .desg dd{font-family:var(--f-num);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;padding-left:12px}
 .desg .sum{color:var(--fg);font-weight:600;border-bottom:0}
+.ctotal{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;align-items:baseline;padding:10px 12px;border-radius:10px;background:var(--accent-soft)}
+.ctotal span{font-weight:600;font-size:.92rem}
+.ctotal b{font:500 1.15rem var(--f-num);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ctotal small{grid-column:1/-1;color:var(--muted);font-size:.78rem}
 .crows{display:grid;gap:0;margin-top:4px}
 .crow{display:grid;gap:8px;padding:12px 0;border-bottom:1px solid var(--line);min-width:0}
 .crow:last-child{border-bottom:0}
@@ -358,6 +362,8 @@ tr.best td{color:var(--accent);font-weight:600}
   // Producto con precio de banco y de fuera: la herramienta elige cuál de los dos usar
   const esAuto = (v) => v.c > 0 && v.f > 0;
   const cuotaTotal = (q, w) => q + (w.costeVinc + w.costeExt) / 12 + extrasMes();
+  // Intereses más todo lo que se paga en seguros y vinculaciones durante el plazo; sin el capital
+  const costeTotal = (r) => r.intereses + r.costeV + r.costeE + extrasMes() * r.n;
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
   function base() {
@@ -563,6 +569,9 @@ tr.best td{color:var(--accent);font-weight:600}
     if (win.costeExt > 0) tips.push(`Los seguros elegidos por tu cuenta cuestan ${eur(win.costeExt)} al año: ${eur(m.costeE)} en todo el plazo.`);
 
     const total = cuotaTotal(m.q, win);
+    const ct = costeTotal(m), cSeguros = ct - m.intereses;
+    const bloqueCoste = `<div class="ctotal"><span>Coste total en ${y} años</span><b>${eur(ct)}</b>
+      <small>${eur(m.intereses)} de intereses${cSeguros >= 0.5 ? ` + ${eur(cSeguros)} de seguros y vinculaciones` : ""}. No incluye el capital que devuelves.</small></div>`;
     const conCoste = win.sel.filter((v) => v.c > 0);
     const hayCostes = conCoste.length > 0 || win.ext.length > 0 || extrasActivos().length > 0;
     const desglose = !S.verTotal ? "" : !hayCostes
@@ -585,6 +594,7 @@ tr.best td{color:var(--accent);font-weight:600}
         <div class="kpi"><b>${pct(win.tin, 2)}</b><small>TIN bonificado</small></div>
         <div class="kpi"><b>${eur(m.entrada)}</b><small>Entrada (+ ${eur(B.gastos)} gastos)</small></div>
       </div>
+      ${bloqueCoste}
       ${desglose}
       <div class="chips">${chips.map(([t, c]) => `<span class="chip ${c}"><i></i>${t}</span>`).join("")}</div>
       <ul class="tips">${tips.map((t) => `<li>${t}</li>`).join("")}</ul>
@@ -642,8 +652,11 @@ tr.best td{color:var(--accent);font-weight:600}
           const dif = Math.abs(f - neto), yRef = nRef / 12, y2 = otra.mejor.n / 12;
           detalle += dif < 1 ? " Las dos salen prácticamente igual."
             : ` Esta opción te ahorra <b>${eur(dif)}</b> al año, <b>${eur(dif * yRef)}</b> en ${yRef} años.`;
-          if (y2 < y) detalle += ` Con el banco podrías bajar a ${y2} años, con una cuota más alta.`;
-          if (y2 > y) detalle += ` Además, terminas a ${y} años en vez de ${y2}.`;
+          const cEsta = eur(costeTotal(m)), cOtra = eur(costeTotal(otra.mejor));
+          const qDif = eur(Math.abs(cuotaTotal(otra.mejor.q, otra) - cuotaTotal(m.q, win)));
+          if (y2 === y) detalle += ` Coste total: ${cEsta} frente a ${cOtra}.`;
+          if (y2 < y) detalle += ` Con el banco podrías bajar a ${y2} años: coste total de ${cOtra} frente a ${cEsta}, pagando ${qDif} más al mes.`;
+          if (y2 > y) detalle += ` Además, terminas a ${y} años en vez de ${y2}: coste total de ${cEsta} frente a ${cOtra}, pagando ${qDif} más al mes.`;
         }
       } else if (neto <= 0) {
         veredicto = '<span class="cv bank">La bonificación paga el producto</span>';
@@ -704,7 +717,7 @@ tr.best td{color:var(--accent);font-weight:600}
       const l = +t.dataset.l, y = +t.dataset.y;
       const r = evalua(baseBanco() * l / 100, y * 12, tin, cv, B, win.costeExt, win.costeAuto);
       const why = { ahorro: "no te llega el ahorro", ltv: "pasa del LTV máximo", ratio: "pasa del ratio de deuda", cuota: "pasa de tu cuota máxima", plazo: "fuera del plazo permitido" };
-      $cell.innerHTML = `<b>${l} % · ${y} años</b>: préstamo ${eur(r.L)}, cuota ${eur2(r.q)}${S.verTotal ? `, cuota total ${eur2(cuotaTotal(r.q, win))}` : ""}, intereses ${eur(r.intereses)}` +
+      $cell.innerHTML = `<b>${l} % · ${y} años</b>: préstamo ${eur(r.L)}, cuota ${eur2(r.q)}${S.verTotal ? `, cuota total ${eur2(cuotaTotal(r.q, win))}` : ""}, intereses ${eur(r.intereses)}, coste total ${eur(costeTotal(r))}` +
         (r.fallos.length ? ` · <span class="fail">no cumple: ${r.fallos.map((f) => why[f]).join(", ")}</span>` : "");
     };
     $cell.textContent = "";
@@ -717,10 +730,10 @@ tr.best td{color:var(--accent);font-weight:600}
     }
     const filas = validos.slice(0, 8).map((r, i) => {
       const m = r.mejor;
-      return `<tr class="${i === 0 ? "best" : ""}"><td>${nombres(r)}</td><td>${pct(r.tin, 2)}</td><td>${m.n / 12}</td><td>${eur2(m.q)}</td>${S.verTotal ? `<td>${eur2(cuotaTotal(m.q, r))}</td>` : ""}<td>${eur(m.intereses)}</td><td>${eur(m.costeV + m.costeE)}</td><td>${eur(m.intereses + m.costeV + m.costeE)}</td></tr>`;
+      return `<tr class="${i === 0 ? "best" : ""}"><td>${nombres(r)}</td><td>${pct(r.tin, 2)}</td><td>${m.n / 12}</td><td>${eur2(m.q)}</td>${S.verTotal ? `<td>${eur2(cuotaTotal(m.q, r))}</td>` : ""}<td>${eur(m.intereses)}</td><td>${eur(costeTotal(m) - m.intereses)}</td><td>${eur(costeTotal(m))}</td></tr>`;
     }).join("");
     $combos.innerHTML = `<h3>Combinaciones de vinculaciones</h3>
-      <div class="tablewrap"><table><thead><tr><th>Vinculaciones</th><th>TIN</th><th>Años</th><th>Cuota</th>${S.verTotal ? "<th>Cuota total</th>" : ""}<th>Intereses</th><th>Costes</th><th>Total</th></tr></thead><tbody>${filas}</tbody></table></div>
+      <div class="tablewrap"><table><thead><tr><th>Vinculaciones</th><th>TIN</th><th>Años</th><th>Cuota</th>${S.verTotal ? "<th>Cuota total</th>" : ""}<th>Intereses</th><th>Costes</th><th>Coste total</th></tr></thead><tbody>${filas}</tbody></table></div>
       <p class="note">Ordenadas por ${S.obj === "tot" ? "intereses + costes" : S.vinc.some(esAuto) ? "intereses + coste de los productos con precio de fuera" : "intereses"}. Cada una con su préstamo mínimo y su plazo más corto que cumple el ratio y la cuota máxima.</p>`;
   }
 
