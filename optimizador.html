@@ -195,6 +195,7 @@ tr.best td{color:var(--accent);font-weight:600}
           <div class="vhead"><span></span><span>Producto</span><span>Bonif.</span><span>Coste/año</span><span></span></div>
           <div class="vinc" id="vinc"></div>
           <div><button type="button" id="addv">Añadir vinculación</button></div>
+          <p class="note">Si un producto tiene precio de fuera en «¿Banco o por tu cuenta?», su casilla se elige sola según lo que más rente.</p>
           <div class="seg" role="radiogroup" aria-label="Qué vinculaciones usar">
             <label><input type="radio" name="vmode" value="fijas" id="vm-fijas">Solo las marcadas</label>
             <label><input type="radio" name="vmode" value="todas" id="vm-todas">Elegir las que convengan</label>
@@ -203,7 +204,7 @@ tr.best td{color:var(--accent);font-weight:600}
 
         <fieldset>
           <legend>Seguros por tu cuenta</legend>
-          <p class="note">Seguros u otros pagos que contrates fuera del banco, con el precio que encuentres. No bajan el TIN: solo se suman a la cuota total.</p>
+          <p class="note">Otros pagos fuera del banco, sin versión con bonificación: se suman a la cuota total. Si el banco también ofrece el producto, pon el precio en «¿Banco o por tu cuenta?» para no contarlo dos veces.</p>
           <div class="vhead xrow" id="exhead"><span></span><span>Producto</span><span>Coste/mes</span><span></span></div>
           <div class="vinc" id="extras"></div>
           <div><button type="button" id="adde">Añadir seguro</button></div>
@@ -224,9 +225,9 @@ tr.best td{color:var(--accent);font-weight:600}
       <section class="verdict" id="verdict" aria-live="polite"></section>
       <section class="panel">
         <h3>¿Banco o por tu cuenta?</h3>
-        <p class="note">Compara cada producto con el precio que encuentres fuera, con el préstamo y el plazo del óptimo. El coste real con el banco es su precio menos lo que ahorras con la bonificación. Escribe el precio anual de fuera, por cobertura equivalente.</p>
+        <p class="note">Escribe el precio anual de fuera, por cobertura equivalente. La herramienta se queda con la opción que menos te cuesta en total y la suma a la cuota total. El coste real con el banco es su precio menos lo que ahorras con la bonificación.</p>
         <div class="crows" id="comp"></div>
-        <p class="note">Supone precios constantes durante todo el plazo. Las primas pueden subir con los años, sobre todo la de vida. Este panel no cambia el óptimo ni la cuota total.</p>
+        <p class="note">Supone precios constantes durante todo el plazo. Las primas pueden subir con los años, sobre todo la de vida.</p>
       </section>
       <section class="panel">
         <h3>Mapa de plazo y LTV</h3>
@@ -354,7 +355,9 @@ tr.best td{color:var(--accent);font-weight:600}
   const entradaMin = () => S.precio - baseBanco() * S.ltvmax / 100;
   const extrasActivos = () => S.extras.filter((e) => e.on && e.m > 0);
   const extrasMes = () => extrasActivos().reduce((a, e) => a + e.m, 0);
-  const cuotaTotal = (q, costeVinc) => q + costeVinc / 12 + extrasMes();
+  // Producto con precio de banco y de fuera: la herramienta elige cuál de los dos usar
+  const esAuto = (v) => v.c > 0 && v.f > 0;
+  const cuotaTotal = (q, w) => q + (w.costeVinc + w.costeExt) / 12 + extrasMes();
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
   function base() {
@@ -367,7 +370,7 @@ tr.best td{color:var(--accent);font-weight:600}
     const plazoTope = Math.min(S.pmax, S.edadmax - S.edad);
     return { gastos, disp, entradaMax, qratio, qmax, limCuota, plazoTope };
   }
-  function evalua(L, n, tin, costeVinc, B) {
+  function evalua(L, n, tin, costeVinc, B, costeExt = 0, costeAuto = 0) {
     const q = cuota(L, tin, n);
     const intereses = q * n - L;
     const ltv = L / baseBanco() * 100;
@@ -378,17 +381,21 @@ tr.best td{color:var(--accent);font-weight:600}
     if (q > B.qratio + 1e-6) fallos.push("ratio");
     if (S.cuotamax > 0 && q > S.cuotamax + 1e-6) fallos.push("cuota");
     if (n / 12 > B.plazoTope || n / 12 < S.pmin) fallos.push("plazo");
-    return { L, n, q, intereses, ltv, entrada, costeV: costeVinc * n / 12, fallos };
+    return { L, n, q, intereses, ltv, entrada, costeV: costeVinc * n / 12, costeE: costeExt * n / 12, costeA: costeAuto * n / 12, fallos };
   }
-  const objetivo = (r) => S.obj === "tot" ? r.intereses + r.costeV : r.intereses;
+  // Los productos con dos precios se comparan siempre por dinero, también al minimizar solo intereses
+  const objetivo = (r) => S.obj === "tot" ? r.intereses + r.costeV + r.costeE : r.intereses + r.costeA;
 
   function combos() {
-    const act = S.vinc.map((v, i) => i);
-    if (S.vmode === "fijas") return [S.vinc.filter((v) => v.on)];
-    const out = [];
-    const n = Math.min(S.vinc.length, 10);
-    for (let m = 0; m < (1 << n); m++) out.push(S.vinc.filter((_, i) => i < n && (m >> i) & 1));
-    return out;
+    const subconjuntos = (lista) => {
+      const out = [];
+      for (let m = 0; m < (1 << lista.length); m++) out.push(lista.filter((_, i) => (m >> i) & 1));
+      return out;
+    };
+    const libres = S.vinc.filter((v) => !esAuto(v));
+    const bases = S.vmode === "todas" ? subconjuntos(libres.slice(0, 10)) : [libres.filter((v) => v.on)];
+    const opciones = subconjuntos(S.vinc.filter(esAuto).slice(0, 10));
+    return bases.map((b) => opciones.map((o) => S.vinc.filter((v) => b.includes(v) || o.includes(v))));
   }
 
   // Óptimo de una combinación: el préstamo mínimo posible y el plazo más corto que cumpla el ratio
@@ -397,19 +404,37 @@ tr.best td{color:var(--accent);font-weight:600}
     const tin = Math.max(0, S.tin - bon);
     const costeVinc = sel.reduce((a, v) => a + (v.c || 0), 0);
     const Lmin = Math.max(0, S.precio - Math.max(0, B.entradaMax));
-    const res = { sel, tin, costeVinc, Lmin, mejor: null, motivo: null };
+    const ext = S.vinc.filter((v) => esAuto(v) && !sel.includes(v));
+    const costeExt = ext.reduce((a, v) => a + v.f, 0);
+    const costeAuto = S.vinc.filter(esAuto).reduce((a, v) => a + (sel.includes(v) ? v.c : v.f), 0);
+    const res = { sel, ext, tin, costeVinc, costeExt, costeAuto, Lmin, mejor: null, motivo: null };
     if (B.entradaMax < entradaMin() - 0.5) { res.motivo = "ahorro-ltv"; return res; }
-    if (Lmin === 0) { res.mejor = { L: 0, n: 0, q: 0, intereses: 0, ltv: 0, entrada: S.precio, costeV: 0, fallos: [] }; return res; }
+    if (Lmin === 0) { res.mejor = { L: 0, n: 0, q: 0, intereses: 0, ltv: 0, entrada: S.precio, costeV: 0, costeE: 0, costeA: 0, fallos: [] }; return res; }
     let best = null;
     const tope = Math.floor(B.plazoTope);
     for (let y = Math.ceil(S.pmin); y <= tope; y++) {
-      const r = evalua(Lmin, y * 12, tin, costeVinc, B);
+      const r = evalua(Lmin, y * 12, tin, costeVinc, B, costeExt, costeAuto);
       if (r.fallos.length) continue;
       if (!best || objetivo(r) < objetivo(best) - 1e-6) best = r;
     }
     if (!best) res.motivo = B.qratio <= 0 ? "ingresos" : "ratio";
     res.mejor = best;
     return res;
+  }
+
+  // Banco o fuera se decide a igual plazo: el más largo que necesite alguna opción.
+  // Así un año menos, conseguido con una cuota más alta, no decide por sí solo.
+  function elige(grupo, B) {
+    const res = grupo.map((sel) => optimo(sel, B));
+    const validos = res.filter((r) => r.mejor);
+    if (!validos.length) return res[res.length - 1];
+    const nRef = Math.max(...validos.map((r) => r.mejor.n)) || 12;
+    const coste = (r) => {
+      const c = evalua(r.Lmin, nRef, r.tin, r.costeVinc, B, r.costeExt, r.costeAuto);
+      return c.intereses + c.costeA;
+    };
+    const win = validos.reduce((a, r) => coste(r) < coste(a) - 1e-6 ? r : a);
+    return Object.assign(win, { nRef });
   }
 
   // ---------- enlace con el simulador (mismo sitio: comparten el almacenamiento del navegador) ----------
@@ -463,23 +488,35 @@ tr.best td{color:var(--accent);font-weight:600}
   const $combos = document.getElementById("combos");
   const $comp = document.getElementById("comp");
   let compSig = null;
-  const nombres = (sel) => sel.length ? sel.map((v) => v.n).join(" + ") : "Sin vinculaciones";
+  const nombres = (r) => {
+    const partes = [...r.sel.map((v) => esc(v.n)), ...r.ext.map((v) => esc(v.n) + " por tu cuenta")];
+    return partes.length ? partes.join(" + ") : "Sin vinculaciones";
+  };
+  const conNombres = (r) => (r.sel.length || r.ext.length ? "con " : "") + nombres(r).toLowerCase();
 
   function run() {
     save();
     const B = base();
-    const lista = combos().map((sel) => optimo(sel, B));
+    const lista = combos().map((g) => elige(g, B));
     const validos = lista.filter((r) => r.mejor).sort((a, b) => objetivo(a.mejor) - objetivo(b.mejor));
     const win = validos[0];
+    const reserva = lista[lista.length - 1];
+    vbox.querySelectorAll(".vrow").forEach((row, i) => {
+      const v = S.vinc[i], cb = row.querySelector("input[type=checkbox]");
+      const auto = esAuto(v);
+      cb.disabled = auto;
+      cb.checked = auto && win ? win.sel.includes(v) : v.on;
+      cb.title = auto ? "Se elige sola: tiene precio de banco y de fuera" : "";
+    });
     pintaVeredicto(win, lista, B);
     pintaComp(win, B);
-    pintaMapa(win || lista[0], B);
+    pintaMapa(win || reserva, B);
     pintaCombos(validos, B);
   }
 
   function pintaVeredicto(win, lista, B) {
     if (!win) {
-      const r = lista[0];
+      const r = lista[lista.length - 1];
       let msg = "";
       if (r.motivo === "ahorro-ltv") {
         const falta = entradaMin() - B.entradaMax;
@@ -523,22 +560,24 @@ tr.best td{color:var(--accent);font-weight:600}
     tips.push(`Cada 1.000 € más de entrada al mismo plazo ahorran ${eur(m.intereses - r1k.intereses)} de intereses.`);
     if (m.ltv > 80) tips.push("Por encima del 80 % de LTV muchos bancos no financian: pregunta por financiación para menores de 35 años o por el aval ICO para jóvenes.");
     if (win.costeVinc > 0) tips.push(`Las vinculaciones elegidas cuestan ${eur(win.costeVinc)} al año: ${eur(m.costeV)} en todo el plazo.`);
+    if (win.costeExt > 0) tips.push(`Los seguros elegidos por tu cuenta cuestan ${eur(win.costeExt)} al año: ${eur(m.costeE)} en todo el plazo.`);
 
-    const total = cuotaTotal(m.q, win.costeVinc);
+    const total = cuotaTotal(m.q, win);
     const conCoste = win.sel.filter((v) => v.c > 0);
-    const hayCostes = conCoste.length > 0 || extrasActivos().length > 0;
+    const hayCostes = conCoste.length > 0 || win.ext.length > 0 || extrasActivos().length > 0;
     const desglose = !S.verTotal ? "" : !hayCostes
       ? '<p class="note">Todavía no hay costes que sumar: marca una vinculación con coste o añade un seguro por tu cuenta.</p>'
       : `<dl class="desg">
           <dt>Cuota de la hipoteca</dt><dd>${eur2(m.q)}</dd>
           ${conCoste.map((v) => `<dt>${esc(v.n)} (vinculación)</dt><dd>${eur2(v.c / 12)}</dd>`).join("")}
+          ${win.ext.map((v) => `<dt>${esc(v.n)} (por tu cuenta)</dt><dd>${eur2(v.f / 12)}</dd>`).join("")}
           ${extrasActivos().map((e) => `<dt>${esc(e.n)} (por tu cuenta)</dt><dd>${eur2(e.m)}</dd>`).join("")}
           <dt class="sum">Cuota total al mes</dt><dd class="sum">${eur2(total)}</dd>
         </dl>
         <p class="note">Supone el ${pct(S.ingresos > 0 ? (total + S.deudas) / S.ingresos * 100 : 0)} de tus ingresos, contando otras deudas. El ratio de deuda y la cuota máxima se siguen comprobando solo con la cuota de la hipoteca.</p>`;
 
     $v.innerHTML = `<span class="eyebrow">Óptimo</span>
-      <h2>${eur(S.precio - m.entrada)} a ${y} años con ${nombres(win.sel).toLowerCase()}</h2>
+      <h2>${eur(S.precio - m.entrada)} a ${y} años ${conNombres(win)}</h2>
       <label class="toggle"><input type="checkbox" id="vertotal"${S.verTotal ? " checked" : ""}>Ver cuota total</label>
       <div class="kpis">
         <div class="kpi main"><b>${eur(m.intereses)}</b><small>Intereses totales</small></div>
@@ -585,27 +624,26 @@ tr.best td{color:var(--accent);font-weight:600}
       const bonOtras = win.sel.filter((x) => x !== v).reduce((a, x) => a + (x.b || 0), 0);
       const qSin = cuota(m.L, Math.max(0, S.tin - bonOtras), m.n);
       const qCon = cuota(m.L, Math.max(0, S.tin - bonOtras - (v.b || 0)), m.n);
-      const ahorro = (qSin - qCon) * 12;
+      const nRef = win.nRef || m.n;
+      const ahorro = (cuota(m.L, Math.max(0, S.tin - bonOtras), nRef) - cuota(m.L, Math.max(0, S.tin - bonOtras - (v.b || 0)), nRef)) * 12;
       const neto = v.c - ahorro;
       const dentro = win.sel.includes(v);
+      const real = neto < 0 ? `Cuesta ${eur(v.c)}, así que te sobran ${eur(-neto)} al año,` : `Te cuesta ${eur(neto)} al año`;
       const marca = S.vmode === "todas" ? "elige «Solo las marcadas» y " : "";
       let veredicto = "", detalle = "", pista = "";
       const base = `La bonificación te ahorra <b>${eur(ahorro)}</b> al año.`;
-      const real = neto < 0 ? `Cuesta ${eur(v.c)}, así que te sobran ${eur(-neto)} al año,` : `Te cuesta ${eur(neto)} al año`;
       if (f > 0) {
-        const dif = f - neto;
-        const plazo = `<b>${eur(Math.abs(dif))}</b> al año (${eur(Math.abs(dif) / 12)} al mes) y <b>${eur(Math.abs(dif) * y)}</b> en ${y} años`;
-        if (dif > 0.5) {
-          veredicto = '<span class="cv bank">Mejor con el banco</span>';
-          detalle = `${base} ${real} frente a ${eur(f)} fuera: ahorras ${plazo}.`;
-          if (!dentro) pista = `Para aplicarlo, ${marca}márcala en Vinculaciones.`;
-        } else if (dif < -0.5) {
-          veredicto = '<span class="cv out">Mejor por tu cuenta</span>';
-          detalle = `${base} ${real} frente a ${eur(f)} fuera: ahorras ${plazo}.`;
-          if (dentro) pista = `Para aplicarlo, ${marca}desmárcala en Vinculaciones y añádelo a «Seguros por tu cuenta».`;
+        const otra = optimo(dentro ? win.sel.filter((x) => x !== v) : S.vinc.filter((x) => win.sel.includes(x) || x === v), B);
+        veredicto = dentro ? '<span class="cv bank">Elegido: con el banco</span>' : '<span class="cv out">Elegido: por tu cuenta</span>';
+        detalle = `${base} ${real} frente a ${eur(f)} fuera.`;
+        if (!otra.mejor) {
+          detalle += " La otra opción no cumple tus límites.";
         } else {
-          veredicto = '<span class="cv">Prácticamente igual</span>';
-          detalle = `${base} ${real} con el banco, frente a ${eur(f)} fuera.`;
+          const dif = Math.abs(f - neto), yRef = nRef / 12, y2 = otra.mejor.n / 12;
+          detalle += dif < 1 ? " Las dos salen prácticamente igual."
+            : ` Esta opción te ahorra <b>${eur(dif)}</b> al año, <b>${eur(dif * yRef)}</b> en ${yRef} años.`;
+          if (y2 < y) detalle += ` Con el banco podrías bajar a ${y2} años, con una cuota más alta.`;
+          if (y2 > y) detalle += ` Además, terminas a ${y} años en vez de ${y2}.`;
         }
       } else if (neto <= 0) {
         veredicto = '<span class="cv bank">La bonificación paga el producto</span>';
@@ -614,7 +652,7 @@ tr.best td{color:var(--accent);font-weight:600}
       } else {
         detalle = `${base} Su coste real es <b>${eur(neto)}</b> al año. Renta con el banco si fuera cuesta más de esa cifra; si no lo necesitas, no renta.`;
       }
-      const aviso = qSin > B.qmax + 1e-6 && !(f > 0 && f - neto > 0.5)
+      const aviso = f === 0 && qSin > B.qmax + 1e-6
         ? `<span class="cwarn">Sin esta bonificación la cuota sería ${eur2(qSin)} y superaría tu máximo de ${eur2(B.qmax)} a ${y} años: tendrías que alargar el plazo.</span>` : "";
       row.querySelector(".cn").textContent = v.n;
       row.querySelector(".cp").textContent = eur(v.c) + "/año";
@@ -636,7 +674,7 @@ tr.best td{color:var(--accent);font-weight:600}
     const celdas = [];
     let lo = Infinity, hi = -Infinity;
     rows.forEach((l) => cols.forEach((y) => {
-      const r = evalua(baseBanco() * l / 100, y * 12, tin, cv, B);
+      const r = evalua(baseBanco() * l / 100, y * 12, tin, cv, B, win.costeExt, win.costeAuto);
       const v = objetivo(r);
       if (!r.fallos.length) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
       celdas.push({ l, y, r, v });
@@ -664,9 +702,9 @@ tr.best td{color:var(--accent);font-weight:600}
     $map.onclick = (e) => {
       const t = e.target.closest("rect[data-l]"); if (!t) return;
       const l = +t.dataset.l, y = +t.dataset.y;
-      const r = evalua(baseBanco() * l / 100, y * 12, tin, cv, B);
+      const r = evalua(baseBanco() * l / 100, y * 12, tin, cv, B, win.costeExt, win.costeAuto);
       const why = { ahorro: "no te llega el ahorro", ltv: "pasa del LTV máximo", ratio: "pasa del ratio de deuda", cuota: "pasa de tu cuota máxima", plazo: "fuera del plazo permitido" };
-      $cell.innerHTML = `<b>${l} % · ${y} años</b>: préstamo ${eur(r.L)}, cuota ${eur2(r.q)}${S.verTotal ? `, cuota total ${eur2(cuotaTotal(r.q, cv))}` : ""}, intereses ${eur(r.intereses)}` +
+      $cell.innerHTML = `<b>${l} % · ${y} años</b>: préstamo ${eur(r.L)}, cuota ${eur2(r.q)}${S.verTotal ? `, cuota total ${eur2(cuotaTotal(r.q, win))}` : ""}, intereses ${eur(r.intereses)}` +
         (r.fallos.length ? ` · <span class="fail">no cumple: ${r.fallos.map((f) => why[f]).join(", ")}</span>` : "");
     };
     $cell.textContent = "";
@@ -679,11 +717,11 @@ tr.best td{color:var(--accent);font-weight:600}
     }
     const filas = validos.slice(0, 8).map((r, i) => {
       const m = r.mejor;
-      return `<tr class="${i === 0 ? "best" : ""}"><td>${nombres(r.sel)}</td><td>${pct(r.tin, 2)}</td><td>${m.n / 12}</td><td>${eur2(m.q)}</td>${S.verTotal ? `<td>${eur2(cuotaTotal(m.q, r.costeVinc))}</td>` : ""}<td>${eur(m.intereses)}</td><td>${eur(m.costeV)}</td><td>${eur(m.intereses + m.costeV)}</td></tr>`;
+      return `<tr class="${i === 0 ? "best" : ""}"><td>${nombres(r)}</td><td>${pct(r.tin, 2)}</td><td>${m.n / 12}</td><td>${eur2(m.q)}</td>${S.verTotal ? `<td>${eur2(cuotaTotal(m.q, r))}</td>` : ""}<td>${eur(m.intereses)}</td><td>${eur(m.costeV + m.costeE)}</td><td>${eur(m.intereses + m.costeV + m.costeE)}</td></tr>`;
     }).join("");
     $combos.innerHTML = `<h3>Combinaciones de vinculaciones</h3>
-      <div class="tablewrap"><table><thead><tr><th>Vinculaciones</th><th>TIN</th><th>Años</th><th>Cuota</th>${S.verTotal ? "<th>Cuota total</th>" : ""}<th>Intereses</th><th>Coste vinc.</th><th>Total</th></tr></thead><tbody>${filas}</tbody></table></div>
-      <p class="note">Ordenadas por ${S.obj === "tot" ? "intereses + coste de las vinculaciones" : "intereses"}. Cada una con su préstamo mínimo y su plazo más corto que cumple el ratio y la cuota máxima.</p>`;
+      <div class="tablewrap"><table><thead><tr><th>Vinculaciones</th><th>TIN</th><th>Años</th><th>Cuota</th>${S.verTotal ? "<th>Cuota total</th>" : ""}<th>Intereses</th><th>Costes</th><th>Total</th></tr></thead><tbody>${filas}</tbody></table></div>
+      <p class="note">Ordenadas por ${S.obj === "tot" ? "intereses + costes" : S.vinc.some(esAuto) ? "intereses + coste de los productos con precio de fuera" : "intereses"}. Cada una con su préstamo mínimo y su plazo más corto que cumple el ratio y la cuota máxima.</p>`;
   }
 
   matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", run);
